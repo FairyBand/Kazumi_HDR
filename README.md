@@ -1,5 +1,5 @@
 # Kazumi
-使用 Flutter 开发的基于自定义规则的番剧采集与在线观看程序。使用最多五行基于 `Xpath` 语法的选择器构建自己的规则。支持规则导入与规则分享。支持基于 `Anime4K` 的实时超分辨率和基于mpv自带逆色调映射的SDR转HDR（目前仅限Windows）。绝赞开发中 (～￣▽￣)～
+使用 Flutter 开发的基于自定义规则的番剧采集与在线观看程序。使用最多五行基于 `Xpath` 语法的选择器构建自己的规则。支持规则导入与规则分享。支持基于 `Anime4K` 的实时超分辨率和SDR转HDR（目前仅限Windows, 支持MPV内置转换滤镜和NVIDIA RTX HDR）。绝赞开发中 (～￣▽￣)～
 
 ## 支持平台
 
@@ -48,6 +48,8 @@
 - [x] 无线投屏 (DLNA)
 - [x] 外部播放器播放
 - [x] 超分辨率
+- [x] SDR2HDR
+- [x] AI HDR
 - [x] 一起看
 - [x] 番剧下载
 - [ ] 番剧更新提醒
@@ -55,9 +57,9 @@
 
 ## 下载
 
-通过本页面 [releases](https://github.com/Predidit/Kazumi/releases) 选项卡下载：
+通过本页面 [releases](https://github.com/FairyBand/Kazumi_HDR/releases) 选项卡下载：
 
-<a href="https://github.com/Predidit/Kazumi/releases">
+<a href="https://github.com/FairyBand/Kazumi_HDR/releases">
   <img src="static/svg/get_it_on_github.svg" alt="Get it on Github" width="200"/>
 </a>
 
