@@ -32,15 +32,18 @@ typedef struct _VideoOutputConfiguration {
   std::optional<int64_t> height;
   bool enable_hardware_acceleration;
   bool windows_native_window;
+  bool windows_native_rtx_hdr;
 
   _VideoOutputConfiguration(std::optional<int64_t> width = std::nullopt,
                             std::optional<int64_t> height = std::nullopt,
                             bool enable_hardware_acceleration = true,
-                            bool windows_native_window = false)
+                            bool windows_native_window = false,
+                            bool windows_native_rtx_hdr = false)
       : width(width),
         height(height),
         enable_hardware_acceleration(enable_hardware_acceleration),
-        windows_native_window(windows_native_window) {}
+        windows_native_window(windows_native_window),
+        windows_native_rtx_hdr(windows_native_rtx_hdr) {}
 } VideoOutputConfiguration;
 
 class VideoOutput {
@@ -88,6 +91,8 @@ class VideoOutput {
                            int64_t height,
                            int64_t clip_top = 0,
                            int64_t clip_bottom = 0);
+
+  void ApplyNativeRtxHdrFilter();
 
   void SyncNativeWindowRect();
 

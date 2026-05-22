@@ -395,6 +395,7 @@ class SettingBoxKey {
       androidAutoEnterPIP = 'androidAutoEnterPIP',
       defaultSuperResolutionType = 'defaultSuperResolutionType',
       mpvHdrTargetPeak = 'mpvHdrTargetPeak',
+      rtxHdrMaxLuma = 'rtxHdrMaxLuma',
       superResolutionWarn = 'superResolutionWarn',
       playerDisableAnimations = 'playerDisableAnimations',
       playerLogLevel = 'playerLogLevel',

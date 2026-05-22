@@ -178,6 +178,7 @@ class NativeVideoController extends PlatformVideoController {
             'enableHardwareAcceleration':
                 configuration.enableHardwareAcceleration,
             'windowsNativeWindow': configuration.windowsNativeWindow,
+            'windowsNativeRtxHdr': configuration.windowsNativeRtxHdr,
           },
         },
       );

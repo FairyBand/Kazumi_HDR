@@ -652,9 +652,11 @@ class _PlayerItemState extends State<PlayerItem>
     }
 
     final bool isHighMode = shaderIndex == 3 || shaderIndex >= 4;
-    final String warningMessage = shaderIndex >= 4
-        ? '启用 mpv SDR->HDR 需要系统和显示器已开启 HDR，并可能明显增加 GPU 负载，是否继续？'
-        : '启用超分辨率（质量档）可能会造成设备卡顿，是否继续？';
+    final String warningMessage = shaderIndex >= 7
+        ? '启用 RTX HDR 候选路径需要 NVIDIA 驱动中开启 RTX 视频 HDR，并可能明显增加 GPU 负载，是否继续？'
+        : shaderIndex >= 4
+            ? '启用 mpv SDR->HDR 需要系统和显示器已开启 HDR，并可能明显增加 GPU 负载，是否继续？'
+            : '启用超分辨率（质量档）可能会造成设备卡顿，是否继续？';
     final bool alreadyShown =
         setting.get(SettingBoxKey.superResolutionWarn, defaultValue: false);
 

@@ -56,6 +56,15 @@ void VideoOutputManager::SetNativeWindowRect(int64_t handle,
   }).detach();
 }
 
+void VideoOutputManager::ApplyNativeRtxHdrFilter(int64_t handle) {
+  std::thread([=]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (video_outputs_.find(handle) != video_outputs_.end()) {
+      video_outputs_[handle]->ApplyNativeRtxHdrFilter();
+    }
+  }).detach();
+}
+
 void VideoOutputManager::SyncNativeWindowRects() {
   std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
   if (!lock.owns_lock()) {

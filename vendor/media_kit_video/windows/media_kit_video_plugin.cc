@@ -9,8 +9,23 @@
 #include "utils.h"
 
 #include <Windows.h>
+#include <string>
 
 namespace media_kit_video {
+
+namespace {
+constexpr const char* kNativeRtxHdrFilter =
+    "d3d11vpp=format=x2bgr10:nvidia-true-hdr=yes";
+
+std::string GetMpvPropertyString(mpv_handle* handle, const char* name) {
+  char* value = mpv_get_property_string(handle, name);
+  std::string result = value ? std::string(value) : "";
+  if (value) {
+    mpv_free(value);
+  }
+  return result;
+}
+}  // namespace
 
 MediaKitVideoPlugin* MediaKitVideoPlugin::instance_ = nullptr;
 
@@ -237,6 +252,8 @@ void MediaKitVideoPlugin::HandleMethodCall(
         configuration[flutter::EncodableValue("enableHardwareAcceleration")]);
     auto configuration_windows_native_window = std::get<bool>(
         configuration[flutter::EncodableValue("windowsNativeWindow")]);
+    auto configuration_windows_native_rtx_hdr = std::get<bool>(
+        configuration[flutter::EncodableValue("windowsNativeRtxHdr")]);
     if (configuration_width.compare("null") != 0) {
       configuration_value.width =
           static_cast<int64_t>(std::stoll(configuration_width.c_str()));
@@ -249,6 +266,8 @@ void MediaKitVideoPlugin::HandleMethodCall(
         configuration_enable_hardware_acceleration;
     configuration_value.windows_native_window =
         configuration_windows_native_window;
+    configuration_value.windows_native_rtx_hdr =
+        configuration_windows_native_rtx_hdr;
 
     video_output_manager_->Create(
         handle_value, configuration_value,
@@ -358,6 +377,77 @@ void MediaKitVideoPlugin::HandleMethodCall(
         static_cast<int64_t>(std::stoll(clip_top.c_str())),
         static_cast<int64_t>(std::stoll(clip_bottom.c_str())));
     result->Success(flutter::EncodableValue(std::monostate{}));
+  } else if (method_call.method_name().compare(
+                 "VideoOutputManager.ApplyNativeRtxHdr") == 0) {
+    auto arguments = std::get<flutter::EncodableMap>(*method_call.arguments());
+    auto handle =
+        std::get<std::string>(arguments[flutter::EncodableValue("handle")]);
+    auto handle_value = static_cast<int64_t>(std::stoll(handle.c_str()));
+    auto mpv_handle_value = reinterpret_cast<mpv_handle*>(handle_value);
+    auto filter = std::string(kNativeRtxHdrFilter);
+    if (auto value = arguments.find(flutter::EncodableValue("filter"));
+        value != arguments.end()) {
+      filter = std::get<std::string>(value->second);
+    }
+    const int property_result =
+        mpv_set_property_string(mpv_handle_value, "vf", filter.c_str());
+    const char* set_args[] = {"change-list", "vf", "set", filter.c_str(),
+                              nullptr};
+    const int command_result = mpv_command(mpv_handle_value, set_args);
+    const int hint_result = mpv_set_property_string(
+        mpv_handle_value, "target-colorspace-hint", "auto");
+    const int strict_result = mpv_set_property_string(
+        mpv_handle_value, "target-colorspace-hint-strict", "yes");
+    const int format_result = mpv_set_property_string(
+        mpv_handle_value, "d3d11-output-format", "auto");
+    const int csp_result =
+        mpv_set_property_string(mpv_handle_value, "d3d11-output-csp", "auto");
+    const int trc_result =
+        mpv_set_property_string(mpv_handle_value, "target-trc", "auto");
+    const int prim_result =
+        mpv_set_property_string(mpv_handle_value, "target-prim", "auto");
+    const int hdr_peak_result =
+        mpv_set_property_string(mpv_handle_value, "hdr-compute-peak", "no");
+    const int inverse_result =
+        mpv_set_property_string(mpv_handle_value, "inverse-tone-mapping", "no");
+    auto response = flutter::EncodableMap{
+        {flutter::EncodableValue("propertyResult"),
+         flutter::EncodableValue(property_result)},
+        {flutter::EncodableValue("propertyError"),
+         flutter::EncodableValue(std::string(mpv_error_string(property_result)))},
+        {flutter::EncodableValue("commandResult"),
+         flutter::EncodableValue(command_result)},
+        {flutter::EncodableValue("commandError"),
+         flutter::EncodableValue(std::string(mpv_error_string(command_result)))},
+        {flutter::EncodableValue("hintResult"),
+         flutter::EncodableValue(hint_result)},
+        {flutter::EncodableValue("strictResult"),
+         flutter::EncodableValue(strict_result)},
+        {flutter::EncodableValue("formatResult"),
+         flutter::EncodableValue(format_result)},
+        {flutter::EncodableValue("cspResult"), flutter::EncodableValue(csp_result)},
+        {flutter::EncodableValue("trcResult"), flutter::EncodableValue(trc_result)},
+        {flutter::EncodableValue("primResult"),
+         flutter::EncodableValue(prim_result)},
+        {flutter::EncodableValue("hdrPeakResult"),
+         flutter::EncodableValue(hdr_peak_result)},
+        {flutter::EncodableValue("inverseResult"),
+         flutter::EncodableValue(inverse_result)},
+        {flutter::EncodableValue("requestedFilter"),
+         flutter::EncodableValue(filter)},
+        {flutter::EncodableValue("vf"),
+         flutter::EncodableValue(GetMpvPropertyString(mpv_handle_value, "vf"))},
+        {flutter::EncodableValue("hwdecCurrent"),
+         flutter::EncodableValue(
+             GetMpvPropertyString(mpv_handle_value, "hwdec-current"))},
+        {flutter::EncodableValue("videoOutFormat"),
+         flutter::EncodableValue(GetMpvPropertyString(
+             mpv_handle_value, "video-out-params/pixelformat"))},
+        {flutter::EncodableValue("d3d11OutputFormat"),
+         flutter::EncodableValue(GetMpvPropertyString(
+             mpv_handle_value, "d3d11-output-format"))},
+    };
+    result->Success(flutter::EncodableValue(response));
   } else if (method_call.method_name().compare("Utils.EnterNativeFullscreen") ==
              0) {
     auto window =

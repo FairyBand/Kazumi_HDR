@@ -128,6 +128,10 @@ class VideoControllerConfiguration {
   /// which is not supported by libmpv's render API.
   final bool windowsNativeWindow;
 
+  /// Enables mpv's NVIDIA RTX Video HDR d3d11vpp filter for the native
+  /// Windows HWND path.
+  final bool windowsNativeRtxHdr;
+
   /// {@macro video_controller_configuration}
   const VideoControllerConfiguration({
     this.vo,
@@ -138,6 +142,7 @@ class VideoControllerConfiguration {
     this.enableHardwareAcceleration = true,
     this.androidAttachSurfaceAfterVideoParameters,
     this.windowsNativeWindow = false,
+    this.windowsNativeRtxHdr = false,
   });
 
   /// Returns a copy of this class with the given fields replaced by the new values.
@@ -150,6 +155,7 @@ class VideoControllerConfiguration {
     bool? enableHardwareAcceleration,
     bool? androidAttachSurfaceAfterVideoParameters,
     bool? windowsNativeWindow,
+    bool? windowsNativeRtxHdr,
   }) =>
       VideoControllerConfiguration(
         vo: vo ?? this.vo,
@@ -163,5 +169,6 @@ class VideoControllerConfiguration {
             androidAttachSurfaceAfterVideoParameters ??
                 this.androidAttachSurfaceAfterVideoParameters,
         windowsNativeWindow: windowsNativeWindow ?? this.windowsNativeWindow,
+        windowsNativeRtxHdr: windowsNativeRtxHdr ?? this.windowsNativeRtxHdr,
       );
 }

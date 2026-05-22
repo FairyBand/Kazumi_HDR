@@ -21,6 +21,21 @@ import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
 import 'package:kazumi/utils/timed_shutdown_service.dart';
 import 'package:kazumi/pages/download/download_controller.dart';
 
+String _superResolutionLabel(int type) {
+  return switch (type) {
+    1 => '关闭',
+    2 => '效率档',
+    3 => '质量档',
+    4 => 'MPV SDR->HDR',
+    5 => '效率档 + MPV HDR',
+    6 => '质量档 + MPV HDR',
+    7 => 'RTX HDR',
+    8 => '效率档 + RTX HDR',
+    9 => '质量档 + RTX HDR',
+    _ => '关闭',
+  };
+}
+
 class PlayerItemPanel extends StatefulWidget {
   const PlayerItemPanel({
     super.key,
@@ -905,7 +920,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                         );
                       },
                       menuChildren: List<MenuItemButton>.generate(
-                        Platform.isWindows ? 6 : 3,
+                        Platform.isWindows ? 9 : 3,
                         (int index) => MenuItemButton(
                           onPressed: () =>
                               widget.handleSuperResolutionChange(index + 1),
@@ -915,17 +930,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                             child: Align(
                               alignment: Alignment.centerLeft,
                               child: Text(
-                                index + 1 == 1
-                                    ? '关闭'
-                                    : index + 1 == 2
-                                        ? '效率档'
-                                        : index + 1 == 3
-                                            ? '质量档'
-                                            : index + 1 == 4
-                                                ? 'MPV SDR->HDR'
-                                                : index + 1 == 5
-                                                    ? '效率档 + HDR'
-                                                    : '质量档 + HDR',
+                                _superResolutionLabel(index + 1),
                                 style: TextStyle(
                                   color: playerController
                                               .playback.superResolutionType ==

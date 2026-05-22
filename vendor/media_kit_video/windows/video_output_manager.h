@@ -50,6 +50,8 @@ class VideoOutputManager {
                            int64_t clip_top = 0,
                            int64_t clip_bottom = 0);
 
+  void ApplyNativeRtxHdrFilter(int64_t handle);
+
   void SyncNativeWindowRects();
 
   void SyncNativeWindowRectsWithClientOrigin(LONG client_origin_x,

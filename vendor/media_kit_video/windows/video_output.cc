@@ -18,6 +18,22 @@
 #define SW_RENDERING_PIXEL_BUFFER_SIZE \
   (SW_RENDERING_MAX_WIDTH) * (SW_RENDERING_MAX_HEIGHT) * (4)
 
+namespace {
+constexpr const char* kNativeRtxHdrFilter =
+    "d3d11vpp=format=x2bgr10:nvidia-true-hdr=yes";
+
+VOID CALLBACK DeferredDestroyNativeWindowProc(HWND,
+                                              UINT,
+                                              UINT_PTR id_event,
+                                              DWORD) {
+  ::KillTimer(nullptr, id_event);
+  auto window = reinterpret_cast<HWND>(id_event);
+  if (::IsWindow(window)) {
+    ::DestroyWindow(window);
+  }
+}
+}
+
 VideoOutput::VideoOutput(int64_t handle,
                          VideoOutputConfiguration configuration,
                          flutter::PluginRegistrarWindows* registrar,
@@ -133,12 +149,16 @@ VideoOutput::VideoOutput(int64_t handle,
 VideoOutput::~VideoOutput() {
   destroyed_ = true;
   if (native_window_) {
-    auto promise = std::make_shared<std::promise<void>>();
-    run_on_main_thread_([window = native_window_, promise]() {
-      ::DestroyWindow(window);
-      promise->set_value();
+    run_on_main_thread_([window = native_window_]() {
+      if (!::IsWindow(window)) {
+        return;
+      }
+      ::ShowWindow(window, SW_HIDE);
+      ::SetWindowPos(window, HWND_BOTTOM, 0, 0, 1, 1,
+                     SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+      ::SetTimer(nullptr, reinterpret_cast<UINT_PTR>(window), 1500,
+                 DeferredDestroyNativeWindowProc);
     });
-    promise->get_future().wait();
     native_window_ = nullptr;
   }
   if (texture_id_) {
@@ -370,6 +390,40 @@ void VideoOutput::SetNativeWindowRect(int64_t left,
   native_window_clip_bottom_ = clip_bottom;
   native_window_rect_valid_ = true;
   SyncNativeWindowRect();
+}
+
+void VideoOutput::ApplyNativeRtxHdrFilter() {
+  if (!configuration_.windows_native_window || !native_window_ || !handle_) {
+    return;
+  }
+  thread_pool_ref_->Post([this]() {
+    const char* vf_args[] = {"change-list", "vf", "set", kNativeRtxHdrFilter,
+                             nullptr};
+    const int vf_result = mpv_command(handle_, vf_args);
+    const int hint_result =
+        mpv_set_property_string(handle_, "target-colorspace-hint", "auto");
+    const int strict_result = mpv_set_property_string(
+        handle_, "target-colorspace-hint-strict", "yes");
+    const int format_result =
+        mpv_set_property_string(handle_, "d3d11-output-format", "auto");
+    const int csp_result =
+        mpv_set_property_string(handle_, "d3d11-output-csp", "auto");
+    const int trc_result =
+        mpv_set_property_string(handle_, "target-trc", "auto");
+    const int prim_result =
+        mpv_set_property_string(handle_, "target-prim", "auto");
+    const int hdr_peak_result =
+        mpv_set_property_string(handle_, "hdr-compute-peak", "no");
+    const int inverse_result =
+        mpv_set_property_string(handle_, "inverse-tone-mapping", "no");
+    std::cout << "media_kit: VideoOutput: Runtime RTX HDR filter result vf="
+              << vf_result << " hint=" << hint_result
+              << " strict=" << strict_result << " format=" << format_result
+              << " csp=" << csp_result << " trc=" << trc_result
+              << " prim=" << prim_result << " hdr_peak=" << hdr_peak_result
+              << " inverse=" << inverse_result << " ("
+              << mpv_error_string(vf_result) << ")" << std::endl;
+  });
 }
 
 void VideoOutput::SyncNativeWindowRect() {
