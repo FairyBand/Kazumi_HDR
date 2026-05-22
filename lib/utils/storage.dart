@@ -394,6 +394,7 @@ class SettingBoxKey {
       androidVideoRenderer = 'androidVideoRenderer',
       androidAutoEnterPIP = 'androidAutoEnterPIP',
       defaultSuperResolutionType = 'defaultSuperResolutionType',
+      mpvHdrTargetPeak = 'mpvHdrTargetPeak',
       superResolutionWarn = 'superResolutionWarn',
       playerDisableAnimations = 'playerDisableAnimations',
       playerLogLevel = 'playerLogLevel',

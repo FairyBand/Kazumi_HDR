@@ -53,6 +53,9 @@ abstract class _PlayerPlaybackController with Store {
   /// 1. OFF
   /// 2. Anime4K Efficiency
   /// 3. Anime4K Quality
+  /// 4. MPV SDR to HDR
+  /// 5. Anime4K Efficiency + MPV SDR to HDR
+  /// 6. Anime4K Quality + MPV SDR to HDR
   @observable
   int superResolutionType = 1;
 
@@ -162,6 +165,9 @@ abstract class _PlayerPlaybackController with Store {
       {int offset = 0}) async {
     superResolutionType =
         setting.get(SettingBoxKey.defaultSuperResolutionType, defaultValue: 1);
+    if (!Platform.isWindows && _isMpvHdrType(superResolutionType)) {
+      superResolutionType = 1;
+    }
     hAenable = setting.get(SettingBoxKey.hAenable, defaultValue: true);
     androidEnableOpenSLES =
         setting.get(SettingBoxKey.androidEnableOpenSLES, defaultValue: true);
@@ -175,8 +181,9 @@ abstract class _PlayerPlaybackController with Store {
 
     final Player player = Player(
       configuration: PlayerConfiguration(
+        vo: 'null',
         bufferSize: lowMemoryMode ? 15 * 1024 * 1024 : 1500 * 1024 * 1024,
-        osc: false,
+        osc: Platform.isWindows && _isMpvHdrType(superResolutionType),
         logLevel: MPVLogLevel.values[debug.playerLogLevel],
         adBlocker: adBlockerEnabled,
       ),
@@ -219,7 +226,6 @@ abstract class _PlayerPlaybackController with Store {
         return await _discardIfNotCurrent(player);
       }
     }
-
     final bool proxyEnable =
         setting.get(SettingBoxKey.proxyEnable, defaultValue: false);
     if (proxyEnable) {
@@ -270,13 +276,38 @@ abstract class _PlayerPlaybackController with Store {
       hardwareDecoder = 'mediacodec';
       superResolutionType = 1;
     }
+    if (Platform.isWindows && _isMpvHdrType(superResolutionType)) {
+      videoRenderer = 'gpu-next';
+      hAenable = true;
+      hardwareDecoder = 'd3d11va';
+      try {
+        await pp.setProperty("gpu-api", "d3d11");
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(player);
+        }
+        await pp.setProperty("osc", "yes");
+        await pp.setProperty("input-default-bindings", "yes");
+        await pp.setProperty("input-vo-keyboard", "yes");
+        await pp.setProperty("cursor-autohide", "1000");
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(player);
+        }
+        KazumiLogger()
+            .i('Player: mpv HDR requested with Windows native gpu-next output');
+      } catch (e) {
+        KazumiLogger().w('PlayerController: failed to set HDR renderer options',
+            error: e);
+      }
+    }
 
-    videoController ??= VideoController(
+    videoController = VideoController(
       player,
       configuration: VideoControllerConfiguration(
         vo: videoRenderer,
         enableHardwareAcceleration: hAenable,
         hwdec: hAenable ? hardwareDecoder : 'no',
+        windowsNativeWindow:
+            Platform.isWindows && _isMpvHdrType(superResolutionType),
         androidAttachSurfaceAfterVideoParameters: false,
       ),
     );
@@ -329,6 +360,9 @@ abstract class _PlayerPlaybackController with Store {
       {bool synchronized = true, Player? player}) async {
     final currentPlayer = player ?? mediaPlayer;
     if (currentPlayer == null) return;
+    if (!Platform.isWindows && _isMpvHdrType(type)) {
+      type = 1;
+    }
     try {
       var pp = currentPlayer.platform as NativePlayer;
       await pp.waitForPlayerInitialization;
@@ -337,6 +371,8 @@ abstract class _PlayerPlaybackController with Store {
         return;
       }
       if (type == 2) {
+        await _setMpvHdrOutput(pp, enabled: false);
+        await pp.command(['change-list', 'vf', 'clr', '']);
         await pp.command([
           'change-list',
           'glsl-shaders',
@@ -348,6 +384,8 @@ abstract class _PlayerPlaybackController with Store {
         return;
       }
       if (type == 3) {
+        await _setMpvHdrOutput(pp, enabled: false);
+        await pp.command(['change-list', 'vf', 'clr', '']);
         await pp.command([
           'change-list',
           'glsl-shaders',
@@ -358,10 +396,114 @@ abstract class _PlayerPlaybackController with Store {
         superResolutionType = 3;
         return;
       }
+      if (_isMpvHdrType(type)) {
+        await pp.setProperty("gpu-api", "d3d11");
+        await pp.setProperty("hwdec", "d3d11va");
+        if (_usesAnime4KLite(type)) {
+          await pp.command([
+            'change-list',
+            'glsl-shaders',
+            'set',
+            Utils.buildShadersAbsolutePath(
+                shadersController.shadersDirectory.path, mpvAnime4KShadersLite),
+          ]);
+        } else if (_usesAnime4KQuality(type)) {
+          await pp.command([
+            'change-list',
+            'glsl-shaders',
+            'set',
+            Utils.buildShadersAbsolutePath(
+                shadersController.shadersDirectory.path, mpvAnime4KShaders),
+          ]);
+        } else {
+          await pp.command(['change-list', 'glsl-shaders', 'clr', '']);
+        }
+        await _setMpvHdrOutput(pp, enabled: true);
+        superResolutionType = type;
+        return;
+      }
+      await _setMpvHdrOutput(pp, enabled: false);
+      await pp.command(['change-list', 'vf', 'clr', '']);
       await pp.command(['change-list', 'glsl-shaders', 'clr', '']);
       superResolutionType = 1;
     } catch (e) {
       KazumiLogger().w('PlayerController: failed to set shader', error: e);
+    }
+  }
+
+  bool _isMpvHdrType(int type) {
+    return type >= 4 && type <= 6;
+  }
+
+  bool get usesWindowsNativeHdr =>
+      Platform.isWindows && _isMpvHdrType(superResolutionType);
+
+  bool _usesAnime4KLite(int type) {
+    return type == 2 || type == 5;
+  }
+
+  bool _usesAnime4KQuality(int type) {
+    return type == 3 || type == 6;
+  }
+
+  Future<void> _setMpvHdrOutput(NativePlayer pp,
+      {required bool enabled}) async {
+    if (enabled) {
+      await _applyMpvProfile(pp, 'gpu-hq');
+      await pp.command([
+        'change-list',
+        'vf',
+        'set',
+        'format=primaries=bt.2020',
+      ]);
+      await pp.setProperty("target-colorspace-hint", "yes");
+      await pp.setProperty("target-colorspace-hint-strict", "no");
+      await pp.setProperty("d3d11-output-format", "rgb10_a2");
+      await pp.setProperty("d3d11-output-csp", "pq");
+      await pp.setProperty("dither-depth", "10");
+      await pp.setProperty("target-trc", "pq");
+      await pp.setProperty("target-prim", "bt.2020");
+      await pp.setProperty("target-peak", _mpvHdrTargetPeak().toString());
+      await pp.setProperty("hdr-compute-peak", "yes");
+      await pp.setProperty("tone-mapping", "bt.2446a");
+      await pp.setProperty("tone-mapping-param", "0.0");
+      await pp.setProperty("tone-mapping-max-boost", "1.0");
+      await pp.setProperty("inverse-tone-mapping", "yes");
+      return;
+    }
+    await pp.command(['change-list', 'vf', 'clr', '']);
+    await pp.setProperty("inverse-tone-mapping", "no");
+    await pp.setProperty("hdr-compute-peak", "no");
+    await pp.setProperty("target-peak", "auto");
+    await pp.setProperty("dither-depth", "auto");
+    await pp.setProperty("tone-mapping", "auto");
+    await pp.setProperty("tone-mapping-param", "0.0");
+    await pp.setProperty("tone-mapping-max-boost", "1.0");
+    await pp.setProperty("target-prim", "auto");
+    await pp.setProperty("target-trc", "auto");
+    await pp.setProperty("target-colorspace-hint", "auto");
+    await pp.setProperty("target-colorspace-hint-strict", "yes");
+    await pp.setProperty("d3d11-output-format", "auto");
+    await pp.setProperty("d3d11-output-csp", "auto");
+  }
+
+  int _mpvHdrTargetPeak() {
+    final peak = setting.get(SettingBoxKey.mpvHdrTargetPeak, defaultValue: 410);
+    if (peak is int) {
+      return peak.clamp(100, 10000);
+    }
+    if (peak is double) {
+      return peak.round().clamp(100, 10000);
+    }
+    return int.tryParse(peak.toString())?.clamp(100, 10000) ?? 410;
+  }
+
+  Future<void> _applyMpvProfile(NativePlayer pp, String profile) async {
+    try {
+      await pp.command(['apply-profile', profile]);
+    } catch (e) {
+      KazumiLogger().w('PlayerController: failed to apply mpv profile $profile',
+          error: e);
     }
   }
 

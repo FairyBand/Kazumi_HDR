@@ -71,6 +71,7 @@ void main() async {
       size: isLowResolution ? const Size(840, 600) : const Size(1280, 860),
       center: true,
       skipTaskbar: false,
+      backgroundColor: Platform.isWindows ? Colors.transparent : null,
       // macOS always hide title bar regardless of showWindowButton setting
       titleBarStyle: (Platform.isMacOS || !showWindowButton)
           ? TitleBarStyle.hidden

@@ -711,7 +711,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
                 ),
                 SubmenuButton(
                   menuChildren: List<MenuItemButton>.generate(
-                    3,
+                    Platform.isWindows ? 6 : 3,
                     (int index) => MenuItemButton(
                       onPressed: () =>
                           widget.handleSuperResolutionChange(index + 1),
@@ -725,7 +725,13 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
                                 ? '关闭'
                                 : index + 1 == 2
                                     ? '效率档'
-                                    : '质量档',
+                                    : index + 1 == 3
+                                        ? '质量档'
+                                        : index + 1 == 4
+                                            ? 'MPV SDR->HDR'
+                                            : index + 1 == 5
+                                                ? '效率档 + HDR'
+                                                : '质量档 + HDR',
                             style: TextStyle(
                               color: playerController
                                           .playback.superResolutionType ==

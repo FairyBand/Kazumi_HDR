@@ -640,7 +640,10 @@ class _VideoPageState extends State<VideoPage>
           }
         }
         return Observer(builder: (context) {
+          final usesWindowsNativeHdr =
+              _playerController?.playback.usesWindowsNativeHdr ?? false;
           return Scaffold(
+            backgroundColor: usesWindowsNativeHdr ? Colors.transparent : null,
             appBar: null,
             body: SafeArea(
                 top: !videoPageController.isFullscreen,
@@ -656,7 +659,9 @@ class _VideoPageState extends State<VideoPage>
                         Flexible(
                           flex: isLandscape ? 1 : 0,
                           child: Container(
-                            color: Colors.black,
+                            color: usesWindowsNativeHdr
+                                ? Colors.transparent
+                                : Colors.black,
                             height: isLandscape
                                 ? MediaQuery.sizeOf(context).height
                                 : MediaQuery.sizeOf(context).width * 9 / 16,
@@ -738,16 +743,20 @@ class _VideoPageState extends State<VideoPage>
   Widget get playerBody {
     final playerController = _playerController;
     final bool playerLoading = playerController?.playback.loading ?? true;
+    final bool usesWindowsNativeHdr =
+        playerController?.playback.usesWindowsNativeHdr ?? false;
+    final bool showLoadingControls = videoPageController.loading ||
+        playerLoading ||
+        videoPageController.errorMessage != null;
     return Stack(
       children: [
         Positioned.fill(
           child: Stack(
             children: [
-              if (videoPageController.loading ||
-                  playerLoading ||
-                  videoPageController.errorMessage != null)
+              if (showLoadingControls)
                 Container(
-                  color: Colors.black,
+                  color:
+                      usesWindowsNativeHdr ? Colors.transparent : Colors.black,
                   child: Observer(builder: (context) {
                     return Center(
                       child: videoPageController.errorMessage != null
@@ -793,7 +802,8 @@ class _VideoPageState extends State<VideoPage>
                 visible: (videoPageController.loading || playerLoading) &&
                     showDebugLog,
                 child: Container(
-                  color: Colors.black,
+                  color:
+                      usesWindowsNativeHdr ? Colors.transparent : Colors.black,
                   child: Align(
                     alignment: Alignment.center,
                     child: ListView.builder(
@@ -812,65 +822,66 @@ class _VideoPageState extends State<VideoPage>
                   ),
                 ),
               ),
-              Stack(
-                children: [
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: EmbeddedNativeControlArea(
-                      requireOffset: !videoPageController.isFullscreen,
-                      child: Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.arrow_back,
-                                color: Colors.white),
-                            onPressed: () => onBackPressed(context),
-                          ),
-                          const Expanded(
-                              child: dtb.DragToMoveArea(
-                                  child: SizedBox(height: 40))),
-                          IconButton(
-                            icon: const Icon(Icons.refresh_outlined,
-                                color: Colors.white),
-                            onPressed: () {
-                              changeEpisode(
-                                  videoPageController.selectedEpisode.episode,
-                                  currentRoad:
-                                      videoPageController.selectedEpisode.road);
-                            },
-                          ),
-                          Visibility(
-                            visible: MediaQuery.sizeOf(context).width >
-                                MediaQuery.sizeOf(context).height,
-                            child: IconButton(
+              if (showLoadingControls)
+                Stack(
+                  children: [
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: EmbeddedNativeControlArea(
+                        requireOffset: !videoPageController.isFullscreen,
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.arrow_back,
+                                  color: Colors.white),
+                              onPressed: () => onBackPressed(context),
+                            ),
+                            const Expanded(
+                                child: dtb.DragToMoveArea(
+                                    child: SizedBox(height: 40))),
+                            IconButton(
+                              icon: const Icon(Icons.refresh_outlined,
+                                  color: Colors.white),
                               onPressed: () {
-                                _toggleTabBodyAnimated();
+                                changeEpisode(
+                                    videoPageController.selectedEpisode.episode,
+                                    currentRoad: videoPageController
+                                        .selectedEpisode.road);
                               },
-                              icon: Icon(
-                                _tabBodyTargetVisible
-                                    ? Icons.menu_open
-                                    : Icons.menu_open_outlined,
-                                color: Colors.white,
+                            ),
+                            Visibility(
+                              visible: MediaQuery.sizeOf(context).width >
+                                  MediaQuery.sizeOf(context).height,
+                              child: IconButton(
+                                onPressed: () {
+                                  _toggleTabBodyAnimated();
+                                },
+                                icon: Icon(
+                                  _tabBodyTargetVisible
+                                      ? Icons.menu_open
+                                      : Icons.menu_open_outlined,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
-                          ),
-                          IconButton(
-                            icon: Icon(
-                                showDebugLog
-                                    ? Icons.bug_report
-                                    : Icons.bug_report_outlined,
-                                color: Colors.white),
-                            onPressed: () {
-                              switchDebugConsole();
-                            },
-                          ),
-                        ],
+                            IconButton(
+                              icon: Icon(
+                                  showDebugLog
+                                      ? Icons.bug_report
+                                      : Icons.bug_report_outlined,
+                                  color: Colors.white),
+                              onPressed: () {
+                                switchDebugConsole();
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
             ],
           ),
         ),

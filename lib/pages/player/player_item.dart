@@ -617,9 +617,14 @@ class _PlayerItemState extends State<PlayerItem>
     }
   }
 
-  // 启用超分辨率（质量档）时弹出提示
+  // 启用高负载视频增强时弹出提示
   Future<void> handleSuperResolutionChange(int shaderIndex) async {
     if (!mounted) return;
+
+    if (!Platform.isWindows && shaderIndex >= 4) {
+      KazumiDialog.showToast(message: 'HDR 视频增强仅支持 Windows 平台');
+      return;
+    }
 
     // mediacodec_embed 不支持超分辨率
     if (Platform.isAndroid && shaderIndex != 1) {
@@ -646,7 +651,10 @@ class _PlayerItemState extends State<PlayerItem>
       }
     }
 
-    final bool isHighMode = shaderIndex == 3;
+    final bool isHighMode = shaderIndex == 3 || shaderIndex >= 4;
+    final String warningMessage = shaderIndex >= 4
+        ? '启用 mpv SDR->HDR 需要系统和显示器已开启 HDR，并可能明显增加 GPU 负载，是否继续？'
+        : '启用超分辨率（质量档）可能会造成设备卡顿，是否继续？';
     final bool alreadyShown =
         setting.get(SettingBoxKey.superResolutionWarn, defaultValue: false);
 
@@ -663,7 +671,7 @@ class _PlayerItemState extends State<PlayerItem>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('启用超分辨率（质量档）可能会造成设备卡顿，是否继续？'),
+                Text(warningMessage),
                 const SizedBox(height: 12),
                 Row(
                   mainAxisSize: MainAxisSize.min,
@@ -703,12 +711,32 @@ class _PlayerItemState extends State<PlayerItem>
         });
       });
 
-      if (confirmed) {
-        playerController.setShader(shaderIndex);
-      }
+      if (confirmed) await _applySuperResolutionChange(shaderIndex);
     } else {
-      playerController.setShader(shaderIndex);
+      await _applySuperResolutionChange(shaderIndex);
     }
+  }
+
+  Future<void> _applySuperResolutionChange(int shaderIndex) async {
+    final previousType = playerController.playback.superResolutionType;
+    final switchesWindowsHdrPath =
+        Platform.isWindows && ((previousType >= 4) != (shaderIndex >= 4));
+
+    await setting.put(SettingBoxKey.defaultSuperResolutionType, shaderIndex);
+
+    if (switchesWindowsHdrPath) {
+      final selection = videoPageController.playbackEpisode;
+      final offset = playerController.playback.playerPosition.inSeconds;
+      KazumiDialog.showToast(message: '正在切换 HDR 渲染路径...');
+      await widget.changeEpisode(
+        selection.episode,
+        currentRoad: selection.road,
+        offset: offset,
+      );
+      return;
+    }
+
+    await playerController.setShader(shaderIndex);
   }
 
   void handleFullscreen() {
@@ -1666,7 +1694,9 @@ class _PlayerItemState extends State<PlayerItem>
       builder: (context) {
         return ClipRect(
           child: Container(
-            color: Colors.black,
+            color: playerController.playback.usesWindowsNativeHdr
+                ? Colors.transparent
+                : Colors.black,
             child: MouseRegion(
               cursor: (videoPageController.isFullscreen &&
                       !playerController.panel.showVideoController)

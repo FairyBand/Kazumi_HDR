@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/utils/storage.dart';
@@ -15,6 +18,7 @@ class SuperResolutionSettings extends StatefulWidget {
 class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
   late final Box setting = GStorage.setting;
   late bool promptOnEnable;
+  late int mpvHdrTargetPeak;
   late final ValueNotifier<String> superResolutionType = ValueNotifier<String>(
     setting
         .get(SettingBoxKey.defaultSuperResolutionType, defaultValue: 1)
@@ -24,14 +28,77 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
   @override
   void initState() {
     super.initState();
+    final int selectedType = int.tryParse(superResolutionType.value) ?? 1;
+    if (!Platform.isWindows && selectedType >= 4) {
+      superResolutionType.value = '1';
+      setting.put(SettingBoxKey.defaultSuperResolutionType, 1);
+    }
     promptOnEnable =
         setting.get(SettingBoxKey.superResolutionWarn, defaultValue: false);
+    mpvHdrTargetPeak = storedMpvHdrTargetPeak();
   }
 
   @override
   void dispose() {
     superResolutionType.dispose();
     super.dispose();
+  }
+
+  Future<void> updateMpvHdrTargetPeak() async {
+    final controller = TextEditingController(text: mpvHdrTargetPeak.toString());
+    final int? targetPeak = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('HDR 峰值亮度'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(
+              suffixText: 'nit',
+              helperText: '填写显示器 HDR 最大峰值亮度，建议 100 - 10000',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () {
+                final value = int.tryParse(controller.text);
+                if (value == null || value < 100 || value > 10000) {
+                  return;
+                }
+                Navigator.of(context).pop(value);
+              },
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    if (targetPeak == null) return;
+    await setting.put(SettingBoxKey.mpvHdrTargetPeak, targetPeak);
+    if (mounted) {
+      setState(() {
+        mpvHdrTargetPeak = targetPeak;
+      });
+    }
+  }
+
+  int storedMpvHdrTargetPeak() {
+    final peak = setting.get(SettingBoxKey.mpvHdrTargetPeak, defaultValue: 410);
+    if (peak is int) {
+      return peak.clamp(100, 10000);
+    }
+    if (peak is double) {
+      return peak.round().clamp(100, 10000);
+    }
+    return int.tryParse(peak.toString())?.clamp(100, 10000) ?? 410;
   }
 
   @override
@@ -45,7 +112,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
         maxWidth: 1000,
         sections: [
           SettingsSection(
-              title: Text('超分辨率需要启用硬件解码, 若启用硬件解码后仍然不生效, 尝试切换视频渲染器为 gpu',
+              title: Text('超分辨率需要启用硬件解码；HDR 增强选项仅在 Windows HDR 环境下可用',
                   style: TextStyle(fontFamily: fontFamily)),
               tiles: [
                 SettingsTile<String>.radioTile(
@@ -97,7 +164,71 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
                       });
                     }
                   },
-                )
+                ),
+                if (Platform.isWindows) ...[
+                  SettingsTile<String>.radioTile(
+                    title: Text("MPV SDR->HDR",
+                        style: TextStyle(fontFamily: fontFamily)),
+                    description: Text("使用 mpv 逆色调映射输出 HDR",
+                        style: TextStyle(fontFamily: fontFamily)),
+                    radioValue: "4",
+                    groupValue: superResolutionType.value,
+                    onChanged: (String? value) {
+                      if (value != null) {
+                        setting.put(SettingBoxKey.defaultSuperResolutionType,
+                            int.tryParse(value) ?? 1);
+                        setState(() {
+                          superResolutionType.value = value;
+                        });
+                      }
+                    },
+                  ),
+                  SettingsTile<String>.radioTile(
+                    title: Text("Anime4K Efficiency + HDR",
+                        style: TextStyle(fontFamily: fontFamily)),
+                    description: Text("Anime4K 效率档 + mpv SDR->HDR",
+                        style: TextStyle(fontFamily: fontFamily)),
+                    radioValue: "5",
+                    groupValue: superResolutionType.value,
+                    onChanged: (String? value) {
+                      if (value != null) {
+                        setting.put(SettingBoxKey.defaultSuperResolutionType,
+                            int.tryParse(value) ?? 1);
+                        setState(() {
+                          superResolutionType.value = value;
+                        });
+                      }
+                    },
+                  ),
+                  SettingsTile<String>.radioTile(
+                    title: Text("Anime4K Quality + HDR",
+                        style: TextStyle(fontFamily: fontFamily)),
+                    description: Text("Anime4K 质量档 + mpv SDR->HDR",
+                        style: TextStyle(fontFamily: fontFamily)),
+                    radioValue: "6",
+                    groupValue: superResolutionType.value,
+                    onChanged: (String? value) {
+                      if (value != null) {
+                        setting.put(SettingBoxKey.defaultSuperResolutionType,
+                            int.tryParse(value) ?? 1);
+                        setState(() {
+                          superResolutionType.value = value;
+                        });
+                      }
+                    },
+                  ),
+                  SettingsTile.navigation(
+                    onPressed: (_) async {
+                      await updateMpvHdrTargetPeak();
+                    },
+                    title: Text('HDR 峰值亮度',
+                        style: TextStyle(fontFamily: fontFamily)),
+                    description: Text('mpv target-peak，单位 nit',
+                        style: TextStyle(fontFamily: fontFamily)),
+                    value: Text('$mpvHdrTargetPeak nit',
+                        style: TextStyle(fontFamily: fontFamily)),
+                  ),
+                ],
               ]),
           SettingsSection(
             title: Text('默认行为', style: TextStyle(fontFamily: fontFamily)),
