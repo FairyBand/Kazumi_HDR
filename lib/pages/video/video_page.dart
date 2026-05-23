@@ -452,12 +452,6 @@ class _VideoPageState extends State<VideoPage>
       return;
     }
     keyboardFocus.requestFocus();
-    if (playerController.danmaku.danDanmakus.isEmpty) {
-      KazumiDialog.showToast(
-        message: '当前剧集不支持弹幕发送的说',
-      );
-      return;
-    }
     if (msg.isEmpty) {
       KazumiDialog.showToast(message: '弹幕内容为空');
       return;
