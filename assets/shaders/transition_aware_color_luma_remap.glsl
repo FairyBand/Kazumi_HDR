@@ -33,19 +33,33 @@
 //!MAXIMUM 0.2
 0.035
 
-//!PARAM highlight_rolloff
-//!DESC Highlight brightness rolloff
+//!PARAM cool_chroma_restore
+//!DESC Blue/cyan chroma restore
 //!TYPE float
 //!MINIMUM 0.0
 //!MAXIMUM 0.8
 0.28
 
-//!PARAM highlight_knee
-//!DESC Highlight rolloff knee
+//!PARAM cool_luma_density
+//!DESC Blue/cyan luma density
 //!TYPE float
-//!MINIMUM 0.3
+//!MINIMUM 0.0
+//!MAXIMUM 0.5
+0.10
+
+//!PARAM pink_chroma_restore
+//!DESC Pale pink chroma restore
+//!TYPE float
+//!MINIMUM 0.0
 //!MAXIMUM 1.2
-0.70
+0.42
+
+//!PARAM pink_luma_density
+//!DESC Pale pink luma density
+//!TYPE float
+//!MINIMUM 0.0
+//!MAXIMUM 0.5
+0.12
 
 //!HOOK PREOUTPUT
 //!BIND HOOKED
@@ -71,16 +85,6 @@ vec3 set_luma(vec3 c, float target_y)
     return c * (target_y / y);
 }
 
-float rolloff_highlights(float y)
-{
-    float knee = max(highlight_knee, 1e-4);
-    float shoulder = max(y - knee, 0.0);
-    float normalized = shoulder / max(1.0 - knee, 1e-4);
-    float compressed = knee + shoulder / (1.0 + highlight_rolloff * normalized);
-    float blend = smoothstep(knee, knee + max(1.0 - knee, 0.08), y);
-    return mix(y, compressed, blend);
-}
-
 float warm_yellow_orange_mask(vec3 c, float y, float sat)
 {
     float rb = c.r - c.b;
@@ -101,6 +105,29 @@ float dark_saturated_mask(float y, float sat)
     return dark * vivid;
 }
 
+float cool_blue_cyan_mask(vec3 c, float y, float sat)
+{
+    float blue_lead = c.b - max(c.r, c.g);
+    float cyan_lead = min(c.g, c.b) - c.r;
+    float blue_hue = smoothstep(0.02, 0.18, blue_lead);
+    float cyan_hue = smoothstep(0.02, 0.20, cyan_lead) * smoothstep(-0.08, 0.12, c.b - c.g);
+    float hue = max(blue_hue, cyan_hue);
+    float level = smoothstep(0.04, 0.45, y) * (1.0 - smoothstep(0.92, 1.30, y));
+    float vivid = smoothstep(0.10, 0.42, sat);
+    return hue * level * vivid;
+}
+
+float pale_pink_mask(vec3 c, float y, float sat)
+{
+    float red_lead = c.r - max(c.g, c.b);
+    float red_hue = smoothstep(0.004, 0.075, red_lead);
+    float blue_green_balance = smoothstep(0.68, 0.94, c.b / max(c.g, 1e-5));
+    float not_yellow_orange = 1.0 - smoothstep(0.12, 0.36, c.g - c.b);
+    float light_surface = smoothstep(0.28, 0.78, y) * (1.0 - smoothstep(1.15, 1.60, y));
+    float pale_color = smoothstep(0.015, 0.11, sat) * (1.0 - smoothstep(0.55, 0.85, sat));
+    return red_hue * blue_green_balance * not_yellow_orange * light_surface * pale_color;
+}
+
 vec4 hook()
 {
     vec4 encoded = HOOKED_texOff(vec2(0.0));
@@ -114,6 +141,8 @@ vec4 hook()
 
     float warm = warm_yellow_orange_mask(c, y, sat);
     float dark_sat = dark_saturated_mask(y, sat);
+    float cool = cool_blue_cyan_mask(c, y, sat);
+    float pink = pale_pink_mask(c, y, sat);
 
     vec3 n1 = max(linearize(HOOKED_texOff(vec2( 1.0,  0.0))).rgb, vec3(0.0));
     vec3 n2 = max(linearize(HOOKED_texOff(vec2(-1.0,  0.0))).rgb, vec3(0.0));
@@ -131,12 +160,16 @@ vec4 hook()
 
     chroma = mix(chroma, avg_chroma, soften);
     chroma *= 1.0 + warm_chroma_boost * warm;
+    chroma *= 1.0 + cool_chroma_restore * cool;
+    chroma *= 1.0 + pink_chroma_restore * pink;
 
     vec3 outc = vec3(y) + chroma;
 
     float warm_target_y = y * (1.0 + warm_luma_boost * warm);
-    float dark_target_y = mix(warm_target_y, max(warm_target_y, 0.75 * y + 0.25 * 0.18), dark_color_lift * dark_sat);
-    float final_target_y = rolloff_highlights(dark_target_y);
+    float cool_target_y = warm_target_y * (1.0 - cool_luma_density * cool * smoothstep(0.25, 1.05, y));
+    float pink_target_y = cool_target_y * (1.0 - pink_luma_density * pink * smoothstep(0.35, 1.10, y));
+    float dark_target_y = mix(pink_target_y, max(pink_target_y, 0.75 * y + 0.25 * 0.18), dark_color_lift * dark_sat * (1.0 - 0.5 * cool) * (1.0 - 0.5 * pink));
+    float final_target_y = dark_target_y;
     outc = set_luma(max(outc, vec3(0.0)), final_target_y);
 
     return delinearize(vec4(max(outc, vec3(0.0)), encoded.a));

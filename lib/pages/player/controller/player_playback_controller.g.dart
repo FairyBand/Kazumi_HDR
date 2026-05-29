@@ -25,6 +25,22 @@ mixin _$PlayerPlaybackController on _PlayerPlaybackController, Store {
     });
   }
 
+  late final _$supportsRtxHdrAtom =
+      Atom(name: '_PlayerPlaybackController.supportsRtxHdr', context: context);
+
+  @override
+  bool get supportsRtxHdr {
+    _$supportsRtxHdrAtom.reportRead();
+    return super.supportsRtxHdr;
+  }
+
+  @override
+  set supportsRtxHdr(bool value) {
+    _$supportsRtxHdrAtom.reportWrite(value, super.supportsRtxHdr, () {
+      super.supportsRtxHdr = value;
+    });
+  }
+
   late final _$volumeAtom =
       Atom(name: '_PlayerPlaybackController.volume', context: context);
 

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
+import 'package:kazumi/services/platform/platform_environment_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
 
 class SuperResolutionSettings extends StatefulWidget {
@@ -20,6 +21,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
   late bool promptOnEnable;
   late int mpvHdrTargetPeak;
   late int rtxHdrMaxLuma;
+  bool supportsRtxHdr = false;
   late final ValueNotifier<String> superResolutionType = ValueNotifier<String>(
     setting
         .get(SettingBoxKey.defaultSuperResolutionType, defaultValue: 1)
@@ -38,6 +40,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
         setting.get(SettingBoxKey.superResolutionWarn, defaultValue: false);
     mpvHdrTargetPeak = storedMpvHdrTargetPeak();
     rtxHdrMaxLuma = storedRtxHdrMaxLuma();
+    _loadRtxGpuSupport();
   }
 
   @override
@@ -52,6 +55,21 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
 
   String textFor(BuildContext context, String zh, String en) {
     return isChineseLocale(context) ? zh : en;
+  }
+
+  Future<void> _loadRtxGpuSupport() async {
+    final supported = await PlatformEnvironmentService.hasSupportedRtxGpu();
+    if (!mounted) return;
+    final int selectedType = int.tryParse(superResolutionType.value) ?? 1;
+    if (!supported && selectedType >= 7) {
+      superResolutionType.value = '1';
+      await setting.put(SettingBoxKey.defaultSuperResolutionType, 1);
+    }
+    if (mounted) {
+      setState(() {
+        supportsRtxHdr = supported;
+      });
+    }
   }
 
   Future<void> updateMpvHdrTargetPeak() async {
@@ -153,14 +171,14 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
   }
 
   int storedMpvHdrTargetPeak() {
-    final peak = setting.get(SettingBoxKey.mpvHdrTargetPeak, defaultValue: 410);
+    final peak = setting.get(SettingBoxKey.mpvHdrTargetPeak, defaultValue: 409);
     if (peak is int) {
       return peak.clamp(100, 10000);
     }
     if (peak is double) {
       return peak.round().clamp(100, 10000);
     }
-    return int.tryParse(peak.toString())?.clamp(100, 10000) ?? 410;
+    return int.tryParse(peak.toString())?.clamp(100, 10000) ?? 409;
   }
 
   int storedRtxHdrMaxLuma() {
@@ -292,39 +310,41 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
                   value: '6',
                   fontFamily: fontFamily,
                 ),
-                superResolutionTile(
-                  context: context,
-                  title: 'RTX HDR',
-                  description: textFor(
-                    context,
-                    '使用 NVIDIA RTX HDR 进行 SDR 到 HDR 增强',
-                    'Use NVIDIA RTX HDR for SDR to HDR enhancement',
+                if (supportsRtxHdr) ...[
+                  superResolutionTile(
+                    context: context,
+                    title: 'RTX HDR',
+                    description: textFor(
+                      context,
+                      '使用 NVIDIA RTX HDR 进行 SDR 到 HDR 增强',
+                      'Use NVIDIA RTX HDR for SDR to HDR enhancement',
+                    ),
+                    value: '7',
+                    fontFamily: fontFamily,
                   ),
-                  value: '7',
-                  fontFamily: fontFamily,
-                ),
-                superResolutionTile(
-                  context: context,
-                  title: 'Anime4K Efficiency + RTX HDR',
-                  description: textFor(
-                    context,
-                    'Anime4K 效率档 + NVIDIA RTX HDR',
-                    'Anime4K efficiency mode + NVIDIA RTX HDR',
+                  superResolutionTile(
+                    context: context,
+                    title: 'Anime4K Efficiency + RTX HDR',
+                    description: textFor(
+                      context,
+                      'Anime4K 效率档 + NVIDIA RTX HDR',
+                      'Anime4K efficiency mode + NVIDIA RTX HDR',
+                    ),
+                    value: '8',
+                    fontFamily: fontFamily,
                   ),
-                  value: '8',
-                  fontFamily: fontFamily,
-                ),
-                superResolutionTile(
-                  context: context,
-                  title: 'Anime4K Quality + RTX HDR',
-                  description: textFor(
-                    context,
-                    'Anime4K 质量档 + NVIDIA RTX HDR',
-                    'Anime4K quality mode + NVIDIA RTX HDR',
+                  superResolutionTile(
+                    context: context,
+                    title: 'Anime4K Quality + RTX HDR',
+                    description: textFor(
+                      context,
+                      'Anime4K 质量档 + NVIDIA RTX HDR',
+                      'Anime4K quality mode + NVIDIA RTX HDR',
+                    ),
+                    value: '9',
+                    fontFamily: fontFamily,
                   ),
-                  value: '9',
-                  fontFamily: fontFamily,
-                ),
+                ],
                 SettingsTile.navigation(
                   onPressed: (_) async {
                     await updateMpvHdrTargetPeak();
@@ -344,25 +364,26 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
                     style: TextStyle(fontFamily: fontFamily),
                   ),
                 ),
-                SettingsTile.navigation(
-                  onPressed: (_) async {
-                    await updateRtxHdrMaxLuma();
-                  },
-                  title: Text(
-                    isZh ? 'RTX HDR 峰值亮度' : 'RTX HDR peak brightness',
-                    style: TextStyle(fontFamily: fontFamily),
+                if (supportsRtxHdr)
+                  SettingsTile.navigation(
+                    onPressed: (_) async {
+                      await updateRtxHdrMaxLuma();
+                    },
+                    title: Text(
+                      isZh ? 'RTX HDR 峰值亮度' : 'RTX HDR peak brightness',
+                      style: TextStyle(fontFamily: fontFamily),
+                    ),
+                    description: Text(
+                      isZh
+                          ? '仅适用于 RTX HDR，且仅对 NVIDIA RTX 显卡有效。'
+                          : 'Only applies to RTX HDR and only works on NVIDIA RTX GPUs.',
+                      style: TextStyle(fontFamily: fontFamily),
+                    ),
+                    value: Text(
+                      '$rtxHdrMaxLuma nit',
+                      style: TextStyle(fontFamily: fontFamily),
+                    ),
                   ),
-                  description: Text(
-                    isZh
-                        ? '仅适用于 RTX HDR，且仅对 NVIDIA RTX 显卡有效。'
-                        : 'Only applies to RTX HDR and only works on NVIDIA RTX GPUs.',
-                    style: TextStyle(fontFamily: fontFamily),
-                  ),
-                  value: Text(
-                    '$rtxHdrMaxLuma nit',
-                    style: TextStyle(fontFamily: fontFamily),
-                  ),
-                ),
               ],
             ],
           ),

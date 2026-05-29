@@ -666,6 +666,12 @@ class _PlayerItemState extends State<PlayerItem>
       KazumiDialog.showToast(message: 'HDR 视频增强仅支持 Windows 平台');
       return;
     }
+    if (shaderIndex >= 7 &&
+        !await playerController.playback.ensureSupportsRtxHdr()) {
+      KazumiDialog.showToast(message: '当前设备未检测到支持 RTX HDR 的 NVIDIA RTX 显卡');
+      await setting.put(SettingBoxKey.defaultSuperResolutionType, 1);
+      return;
+    }
 
     // mediacodec_embed 不支持超分辨率
     if (Platform.isAndroid && shaderIndex != 1) {

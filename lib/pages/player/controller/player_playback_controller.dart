@@ -71,6 +71,9 @@ abstract class _PlayerPlaybackController with Store {
   int superResolutionType = 1;
 
   @observable
+  bool supportsRtxHdr = false;
+
+  @observable
   double volume = -1;
 
   /// 手势调节时的精确音量，避免 UI 节流导致累计误差
@@ -179,8 +182,11 @@ abstract class _PlayerPlaybackController with Store {
       {int offset = 0}) async {
     superResolutionType =
         setting.get(SettingBoxKey.defaultSuperResolutionType, defaultValue: 1);
-    if (!Platform.isWindows && _isWindowsNativeHdrType(superResolutionType)) {
+    supportsRtxHdr = await ensureSupportsRtxHdr();
+    if ((!Platform.isWindows && _isWindowsNativeHdrType(superResolutionType)) ||
+        (_isRtxHdrType(superResolutionType) && !supportsRtxHdr)) {
       superResolutionType = 1;
+      await setting.put(SettingBoxKey.defaultSuperResolutionType, 1);
     }
     hAenable = setting.get(SettingBoxKey.hAenable, defaultValue: true);
     androidEnableOpenSLES =
@@ -385,6 +391,10 @@ abstract class _PlayerPlaybackController with Store {
     if (!Platform.isWindows && _isWindowsNativeHdrType(type)) {
       type = 1;
     }
+    if (_isRtxHdrType(type) && !await ensureSupportsRtxHdr()) {
+      type = 1;
+      await setting.put(SettingBoxKey.defaultSuperResolutionType, 1);
+    }
     try {
       var pp = currentPlayer.platform as NativePlayer;
       await pp.waitForPlayerInitialization;
@@ -499,6 +509,15 @@ abstract class _PlayerPlaybackController with Store {
     return _isMpvHdrType(type) || _isRtxHdrType(type);
   }
 
+  Future<bool> ensureSupportsRtxHdr() async {
+    if (!Platform.isWindows) {
+      supportsRtxHdr = false;
+      return false;
+    }
+    supportsRtxHdr = await PlatformEnvironmentService.hasSupportedRtxGpu();
+    return supportsRtxHdr;
+  }
+
   bool get usesWindowsNativeHdr =>
       Platform.isWindows && _isWindowsNativeHdrType(superResolutionType);
 
@@ -554,8 +573,8 @@ abstract class _PlayerPlaybackController with Store {
     }
     await pp.setProperty("inverse-tone-mapping", "no");
     await pp.setProperty("hdr-compute-peak", "no");
-    await pp.setProperty("hdr-peak-percentile", "auto");
-    await pp.setProperty("hdr-peak-decay-rate", "auto");
+    await pp.setProperty("hdr-peak-percentile", "100.0");
+    await pp.setProperty("hdr-peak-decay-rate", "20.0");
     await pp.setProperty("target-peak", "auto");
     await pp.setProperty("hdr-reference-white", "auto");
     await pp.setProperty("dither-depth", "auto");
@@ -563,8 +582,8 @@ abstract class _PlayerPlaybackController with Store {
     await pp.setProperty("tone-mapping-param", "0.0");
     await pp.setProperty("tone-mapping-max-boost", "1.0");
     await pp.setProperty("gamut-mapping-mode", "auto");
-    await pp.setProperty("hdr-contrast-recovery", "auto");
-    await pp.setProperty("hdr-contrast-smoothness", "auto");
+    await pp.setProperty("hdr-contrast-recovery", "0.0");
+    await pp.setProperty("hdr-contrast-smoothness", "3.5");
     await pp.setProperty("target-prim", "auto");
     await pp.setProperty("target-trc", "auto");
     await pp.setProperty("target-colorspace-hint", "auto");
@@ -645,14 +664,14 @@ abstract class _PlayerPlaybackController with Store {
   }
 
   int _mpvHdrTargetPeak() {
-    final peak = setting.get(SettingBoxKey.mpvHdrTargetPeak, defaultValue: 410);
+    final peak = setting.get(SettingBoxKey.mpvHdrTargetPeak, defaultValue: 409);
     if (peak is int) {
       return peak.clamp(100, 10000);
     }
     if (peak is double) {
       return peak.round().clamp(100, 10000);
     }
-    return int.tryParse(peak.toString())?.clamp(100, 10000) ?? 410;
+    return int.tryParse(peak.toString())?.clamp(100, 10000) ?? 409;
   }
 
   String _rtxHdrFilter() {

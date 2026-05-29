@@ -38,6 +38,16 @@ String _superResolutionLabel(int type) {
   };
 }
 
+List<int> _superResolutionOptions(bool supportsRtxHdr) {
+  if (!Platform.isWindows) {
+    return const [1, 2, 3];
+  }
+  if (!supportsRtxHdr) {
+    return const [1, 2, 3, 4, 5, 6];
+  }
+  return const [1, 2, 3, 4, 5, 6, 7, 8, 9];
+}
+
 class PlayerItemPanel extends StatefulWidget {
   const PlayerItemPanel({
     super.key,
@@ -842,30 +852,35 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                           ),
                         );
                       },
-                      menuChildren: List<MenuItemButton>.generate(
-                        Platform.isWindows ? 9 : 3,
-                        (int index) => MenuItemButton(
-                          onPressed: () =>
-                              widget.handleSuperResolutionChange(index + 1),
-                          child: Container(
-                            height: 48,
-                            constraints: BoxConstraints(minWidth: 112),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                _superResolutionLabel(index + 1),
-                                style: TextStyle(
-                                  color: playerController
-                                              .playback.superResolutionType ==
-                                          index + 1
-                                      ? Theme.of(context).colorScheme.primary
-                                      : null,
+                      menuChildren: _superResolutionOptions(
+                        playerController.playback.supportsRtxHdr,
+                      )
+                          .map(
+                            (type) => MenuItemButton(
+                              onPressed: () =>
+                                  widget.handleSuperResolutionChange(type),
+                              child: Container(
+                                height: 48,
+                                constraints: BoxConstraints(minWidth: 112),
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    _superResolutionLabel(type),
+                                    style: TextStyle(
+                                      color: playerController.playback
+                                                  .superResolutionType ==
+                                              type
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .primary
+                                          : null,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                      ),
+                          )
+                          .toList(),
                     ),
                     // 倍速播放
                     PlayerPanelHoldMenuAnchor(
