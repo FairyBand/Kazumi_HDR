@@ -1,5 +1,8 @@
 # Kazumi
-使用 Flutter 开发的基于自定义规则的番剧采集与在线观看程序。使用最多五行基于 `Xpath` 语法的选择器构建自己的规则。支持规则导入与规则分享。支持基于 `Anime4K` 的实时超分辨率和SDR转HDR（目前仅限Windows, 支持MPV内置转换滤镜和NVIDIA RTX HDR）。绝赞开发中 (～￣▽￣)～
+
+[![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=flat&logo=telegram&logoColor=white)](https://t.me/kazumi_app)
+
+使用 Flutter 开发的基于自定义规则的番剧采集与在线观看程序。使用最多五行基于 `Xpath` 语法的选择器构建自己的规则。支持规则导入与规则分享。支持基于 `Anime4K` 的实时超分辨率和 SDR 转 HDR（目前仅限 Windows，支持 MPV 内置映射和 NVIDIA RTX HDR）。绝赞开发中 (～￣▽￣)～
 
 ## 支持平台
 
@@ -49,7 +52,7 @@
 - [x] 外部播放器播放
 - [x] 超分辨率
 - [x] SDR2HDR
-- [x] AI HDR
+- [x] RTX HDR
 - [x] 一起看
 - [x] 番剧下载
 - [ ] 番剧更新提醒
@@ -72,7 +75,6 @@
 
 ### GNU/Linux
 
-&nbsp;&nbsp;
 <a href="https://flathub.org/apps/io.github.Predidit.Kazumi">
   <img src="https://flathub.org/api/badge?svg&locale=en" alt="Get it on Flathub" width="175"/>
 </a>
@@ -192,6 +194,4 @@ A: 本项目编译需要良好的网络环境, 除了由 Google 托管的 Flutte
 感谢 [avbuild](https://github.com/wang-bin/avbuild) 本项目使用了来自 avbuild 的树外补丁实现非标准视频流播放。
 
 感谢 [hive](https://github.com/isar/hive) 本项目持久化储存能力来自 hive。
-
-
 
