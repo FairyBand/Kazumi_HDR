@@ -12,6 +12,10 @@ import 'package:kazumi/modules/collect/collect_sync_merger.dart';
 import 'package:kazumi/modules/search/search_history_module.dart';
 import 'package:kazumi/modules/download/download_module.dart';
 
+
+import 'package:kazumi/services/storage/settings_keys.dart';
+export 'package:kazumi/services/storage/settings_keys.dart';
+
 class GStorage {
   /// Don't use favorites box, it's replaced by collectibles.
   static late Box<BangumiItem> favorites;
@@ -19,7 +23,7 @@ class GStorage {
   static late Box<History> histories;
   static late Box<CollectedBangumiChange> collectChanges;
   static late Box<String> shieldList;
-  static late final Box<dynamic> setting;
+  static late final Box<dynamic> _setting;
   static late Box<SearchHistory> searchHistory;
   static late Box<DownloadRecord> downloads;
 
@@ -156,7 +160,7 @@ class GStorage {
     favorites = await _openBoxSafe<BangumiItem>('favorites');
     collectibles = await _openBoxSafe<CollectedBangumi>('collectibles');
     histories = await _openBoxSafe<History>('histories');
-    setting = await _openBoxSafe<dynamic>('setting');
+    _setting = await _openBoxSafe<dynamic>('setting');
     collectChanges =
         await _openBoxSafe<CollectedBangumiChange>('collectchanges');
     shieldList = await _openBoxSafe<String>('shieldList');
@@ -327,102 +331,52 @@ class GStorage {
     });
   }
 
-  // Prevent instantiation
+  static T getSetting<T>(
+    SettingKey<T> key, {
+    SettingContext context = const SettingContext(),
+  }) {
+    final defaultValue = key.resolveDefault(context);
+    final storedValue = _setting.get(key.name);
+    if (storedValue is T) {
+      return storedValue;
+    }
+    return defaultValue;
+  }
+
+  static Future<void> putSetting<T>(SettingKey<T> key, T value) async {
+    await _setting.put(key.name, value);
+  }
+
+  static List<String> getStringListSettingByName(
+    String key, {
+    List<String> defaultValue = const [],
+  }) {
+    final storedValue = _setting.get(key);
+    if (storedValue is List) {
+      return storedValue.whereType<String>().toList();
+    }
+    return defaultValue;
+  }
+
+  static Future<void> putStringListSettingByName(
+    String key,
+    List<String> value,
+  ) async {
+    await _setting.put(key, value);
+  }
+
+  static Future<void> resetSettings(Iterable<SettingKey<Object?>> keys) async {
+    await _setting.deleteAll(keys.map((key) => key.name));
+    await _setting.flush();
+  }
+
+  static Future<void> resetPlayerSettings() async {
+    await resetSettings(SettingsKeys.byGroup(SettingGroup.player));
+  }
+
+  static Future<void> resetDanmakuSettings() async {
+    await resetSettings(SettingsKeys.byGroup(SettingGroup.danmaku));
+  }
+
   GStorage._();
-}
-
-class SettingBoxKey {
-  static const String hAenable = 'hAenable',
-      hardwareDecoder = 'hardwareDecoder',
-      searchEnhanceEnable = 'searchEnhanceEnable',
-      autoUpdate = 'autoUpdate',
-      alwaysOntop = 'alwaysOntop',
-      defaultPlaySpeed = 'defaultPlaySpeed',
-      defaultShortcutForwardPlaySpeed = 'defaultShortcutForwardPlaySpeed',
-      defaultAspectRatioType = 'defaultAspectRatioType',
-      buttonSkipTime = 'buttonSkipTime',
-      arrowKeySkipTime = 'arrowKeySkipTime',
-      danmakuEnhance = 'danmakuEnhance',
-      danmakuBorder = 'danmakuBorder',
-      danmakuBorderSize = 'danmakuBorderSize',
-      danmakuOpacity = 'danmakuOpacity',
-      danmakuFontSize = 'danmakuFontSize',
-      danmakuTop = 'danmakuTop',
-      danmakuScroll = 'danmakuScroll',
-      danmakuBottom = 'danmakuBottom',
-      danmakuMassive = 'danmakuMassive',
-      danmakuDeduplication = 'danmakuDeduplication',
-      danmakuArea = 'danmakuArea',
-      danmakuColor = 'danmakuColor',
-      danmakuDuration = 'danmakuDuration',
-      danmakuLineHeight = 'danmakuLineHeight',
-      danmakuTimeOffset = 'danmakuTimeOffset',
-      danmakuEnabledByDefault = 'danmakuEnabledByDefault',
-      danmakuBiliBiliSource = 'danmakuBiliBiliSource',
-      danmakuGamerSource = 'danmakuGamerSource',
-      danmakuDanDanSource = 'danmakuDanDanSource',
-      danmakuFontWeight = 'danmakuFontWeight',
-      danmakuFollowSpeed = 'danmakuFollowSpeed',
-      themeMode = 'themeMode',
-      themeColor = 'themeColor',
-      privateMode = 'privateMode',
-      autoPlay = 'autoPlay',
-      autoPlayNext = 'autoPlayNext',
-      playResume = 'playResume',
-      showPlayerError = 'showPlayerError',
-      oledEnhance = 'oledEnhance',
-      displayMode = 'displayMode',
-      enableGitProxy = 'enableGitProxy',
-      enableBangumiProxy = 'enableBangumiProxy',
-      enableSystemProxy = 'enableSystemProxy',
-      defaultStartupPage = 'defaultStartupPage',
-
-      /// Deprecated
-      isWideScreen = 'isWideScreen',
-      webDavEnable = 'webDavEnable',
-      webDavEnableHistory = 'webDavEnableHistory',
-      webDavEnableCollect = 'webDavEnableCollect',
-      webDavURL = 'webDavURL',
-      webDavUsername = 'webDavUsername',
-      webDavPassword = 'webDavPasswd',
-      lowMemoryMode = 'lowMemoryMode',
-      showWindowButton = 'showWindowButton',
-      useDynamicColor = 'useDynamicColor',
-      exitBehavior = 'exitBehavior',
-      playerDebugMode = 'playerDebugMode',
-      syncPlayEndPoint = 'syncPlayEndPoint',
-      androidEnableOpenSLES = 'androidEnableOpenSLES',
-      androidVideoRenderer = 'androidVideoRenderer',
-      androidAutoEnterPIP = 'androidAutoEnterPIP',
-      defaultSuperResolutionType = 'defaultSuperResolutionType',
-      mpvHdrTargetPeak = 'mpvHdrTargetPeak',
-      rtxHdrMaxLuma = 'rtxHdrMaxLuma',
-      superResolutionWarn = 'superResolutionWarn',
-      playerDisableAnimations = 'playerDisableAnimations',
-      playerLogLevel = 'playerLogLevel',
-      searchNotShowWatchedBangumis = 'searchNotShowWatchedBangumis',
-      searchNotShowAbandonedBangumis = 'searchNotShowAbandonedBangumis',
-      timelineNotShowAbandonedBangumis = 'timelineNotShowAbandonedBangumis',
-      timelineNotShowWatchedBangumis = 'timelineNotShowWatchedBangumis',
-      timelineOnlyShowWatchingBangumis = 'timelineOnlyShowWatchingBangumis',
-      useSystemFont = 'useSystemFont',
-      forceAdBlocker = 'forceAdBlocker',
-      backgroundPlayback = 'backgroundPlayback',
-      proxyEnable = 'proxyEnable',
-      proxyConfigured = 'proxyConfigured',
-      proxyUrl = 'proxyUrl',
-      proxyTestUrl = 'proxyTestUrl',
-      showRating = 'showRating',
-      downloadParallelEpisodes = 'downloadParallelEpisodes',
-      downloadParallelSegments = 'downloadParallelSegments',
-      downloadDanmaku = 'downloadDanmaku',
-      shortcutDialogShown = 'shortcutDialogShown',
-      bangumiSyncEnable = 'bangumiSyncEnable',
-      bangumiAccessToken = 'bangumiAccessToken',
-      bangumiSyncPriority = 'bangumiSyncPriority',
-      bangumiImmediateSyncToastEnable = 'bangumiImmediateSyncToastEnable',
-      brightnessVolumeGesture = 'brightnessVolumeGesture',
-      historySyncDeviceId = 'historySyncDeviceId',
-      historySyncSequence = 'historySyncSequence',
-      historySyncSnapshotInitialized = 'historySyncSnapshotInitialized';
 }

@@ -432,10 +432,10 @@ class VideoWebviewImpl
   }
 
   @override
-  void dispose() {
+  Future<void> dispose() async {
     videoParserTimer?.cancel();
     videoParserTimer = null;
-    headlessWebView?.dispose();
+    await headlessWebView?.dispose();
     headlessWebView = null;
     webviewController = null;
     disposeEventControllers();
@@ -475,15 +475,12 @@ class VideoWebviewImpl
   }
 
   Future<void> _setupProxy() async {
-    final setting = GStorage.setting;
-    final bool proxyEnable =
-        setting.get(SettingBoxKey.proxyEnable, defaultValue: false);
+    final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
     if (!proxyEnable) {
       return;
     }
 
-    final String proxyUrl =
-        setting.get(SettingBoxKey.proxyUrl, defaultValue: '');
+    final String proxyUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
     final formattedProxy = ProxyUtils.getFormattedProxyUrl(proxyUrl);
     if (formattedProxy == null) {
       return;

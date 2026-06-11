@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:card_settings_ui/card_settings_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:hive_ce/hive.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/services/platform/platform_environment_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
@@ -17,15 +16,12 @@ class SuperResolutionSettings extends StatefulWidget {
 }
 
 class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
-  late final Box setting = GStorage.setting;
   late bool promptOnEnable;
   late int mpvHdrTargetPeak;
   late int rtxHdrMaxLuma;
   bool supportsRtxHdr = false;
   late final ValueNotifier<String> superResolutionType = ValueNotifier<String>(
-    setting
-        .get(SettingBoxKey.defaultSuperResolutionType, defaultValue: 1)
-        .toString(),
+    GStorage.getSetting(SettingsKeys.defaultSuperResolutionType).toString(),
   );
 
   @override
@@ -34,10 +30,9 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
     final int selectedType = int.tryParse(superResolutionType.value) ?? 1;
     if (!Platform.isWindows && selectedType >= 4) {
       superResolutionType.value = '1';
-      setting.put(SettingBoxKey.defaultSuperResolutionType, 1);
+      GStorage.putSetting(SettingsKeys.defaultSuperResolutionType, 1);
     }
-    promptOnEnable =
-        setting.get(SettingBoxKey.superResolutionWarn, defaultValue: false);
+    promptOnEnable = GStorage.getSetting(SettingsKeys.superResolutionWarn);
     mpvHdrTargetPeak = storedMpvHdrTargetPeak();
     rtxHdrMaxLuma = storedRtxHdrMaxLuma();
     _loadRtxGpuSupport();
@@ -63,7 +58,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
     final int selectedType = int.tryParse(superResolutionType.value) ?? 1;
     if (!supported && selectedType >= 7) {
       superResolutionType.value = '1';
-      await setting.put(SettingBoxKey.defaultSuperResolutionType, 1);
+      await GStorage.putSetting(SettingsKeys.defaultSuperResolutionType, 1);
     }
     if (mounted) {
       setState(() {
@@ -113,7 +108,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
     );
     controller.dispose();
     if (targetPeak == null) return;
-    await setting.put(SettingBoxKey.mpvHdrTargetPeak, targetPeak);
+    await GStorage.putSetting(SettingsKeys.mpvHdrTargetPeak, targetPeak);
     if (mounted) {
       setState(() {
         mpvHdrTargetPeak = targetPeak;
@@ -162,7 +157,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
     );
     controller.dispose();
     if (maxLuma == null) return;
-    await setting.put(SettingBoxKey.rtxHdrMaxLuma, maxLuma);
+    await GStorage.putSetting(SettingsKeys.rtxHdrMaxLuma, maxLuma);
     if (mounted) {
       setState(() {
         rtxHdrMaxLuma = maxLuma;
@@ -171,30 +166,20 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
   }
 
   int storedMpvHdrTargetPeak() {
-    final peak = setting.get(SettingBoxKey.mpvHdrTargetPeak, defaultValue: 409);
-    if (peak is int) {
-      return peak.clamp(100, 10000);
-    }
-    if (peak is double) {
-      return peak.round().clamp(100, 10000);
-    }
-    return int.tryParse(peak.toString())?.clamp(100, 10000) ?? 409;
+    return GStorage.getSetting(SettingsKeys.mpvHdrTargetPeak)
+        .clamp(100, 10000)
+        .toInt();
   }
 
   int storedRtxHdrMaxLuma() {
-    final peak = setting.get(SettingBoxKey.rtxHdrMaxLuma, defaultValue: 1000);
-    if (peak is int) {
-      return peak.clamp(100, 10000);
-    }
-    if (peak is double) {
-      return peak.round().clamp(100, 10000);
-    }
-    return int.tryParse(peak.toString())?.clamp(100, 10000) ?? 1000;
+    return GStorage.getSetting(SettingsKeys.rtxHdrMaxLuma)
+        .clamp(100, 10000)
+        .toInt();
   }
 
   Future<void> setSuperResolutionType(String value) async {
-    await setting.put(
-      SettingBoxKey.defaultSuperResolutionType,
+    await GStorage.putSetting(
+      SettingsKeys.defaultSuperResolutionType,
       int.tryParse(value) ?? 1,
     );
     if (mounted) {
@@ -407,8 +392,8 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
                 initialValue: promptOnEnable,
                 onToggle: (value) async {
                   promptOnEnable = value ?? !promptOnEnable;
-                  await setting.put(
-                    SettingBoxKey.superResolutionWarn,
+                  await GStorage.putSetting(
+                    SettingsKeys.superResolutionWarn,
                     promptOnEnable,
                   );
                   if (mounted) setState(() {});

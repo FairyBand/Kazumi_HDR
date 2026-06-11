@@ -8,7 +8,6 @@ import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/pages/player/player_item.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:hive_ce/hive.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/player/pip_utils.dart';
 import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
@@ -34,7 +33,6 @@ class VideoPage extends StatefulWidget {
 
 class _VideoPageState extends State<VideoPage>
     with TickerProviderStateMixin, WindowListener {
-  Box setting = GStorage.setting;
   final VideoPageController videoPageController =
       Modular.get<VideoPageController>();
   PlayerController? _playerController;
@@ -92,9 +90,9 @@ class _VideoPageState extends State<VideoPage>
       curve: Curves.easeIn,
     ));
 
-    playResume = setting.get(SettingBoxKey.playResume, defaultValue: true);
+    playResume = GStorage.getSetting(SettingsKeys.playResume);
     disableAnimations =
-        setting.get(SettingBoxKey.playerDisableAnimations, defaultValue: false);
+        GStorage.getSetting(SettingsKeys.playerDisableAnimations);
 
     // PlayerController is route-scoped and may not be registered until after
     // the first frame.
@@ -937,7 +935,7 @@ class _VideoPageState extends State<VideoPage>
                     }
                   },
                   child: Text(
-                    '播放列表${visibleRoad + 1} ',
+                    '播放线路${visibleRoad + 1} ',
                     style: const TextStyle(fontSize: 13),
                   ),
                 ),
@@ -957,7 +955,7 @@ class _VideoPageState extends State<VideoPage>
                   child: Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      '播放列表${i + 1}',
+                      '播放线路${i + 1}',
                       style: TextStyle(
                         color: i == visibleRoad
                             ? Theme.of(context).colorScheme.primary
@@ -1034,82 +1032,81 @@ class _VideoPageState extends State<VideoPage>
     return Observer(
       builder: (context) {
         var cardList = <Widget>[];
-        for (var road in videoPageController.roadList) {
-          if (road.name == '播放列表${visibleRoad + 1}') {
-            int count = 1;
-            for (var urlItem in road.data) {
-              int count0 = count;
-              cardList.add(Container(
-                margin: const EdgeInsets.only(bottom: 4),
-                child: Material(
-                  color: Theme.of(context).colorScheme.onInverseSurface,
-                  borderRadius: BorderRadius.circular(6),
-                  clipBehavior: Clip.hardEdge,
-                  child: InkWell(
-                    onTap: () async {
-                      if (count0 ==
-                              videoPageController.selectedEpisode.episode &&
-                          videoPageController.selectedEpisode.road ==
-                              visibleRoad) {
-                        return;
-                      }
-                      KazumiLogger()
-                          .i('VideoPageController: video URL is $urlItem');
-                      _closeTabBodyAnimated();
-                      changeEpisode(count0, currentRoad: visibleRoad);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 8, horizontal: 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Row(
-                            children: [
-                              if (count0 ==
-                                      (videoPageController
-                                          .selectedEpisode.episode) &&
-                                  visibleRoad ==
-                                      videoPageController
-                                          .selectedEpisode.road) ...<Widget>[
-                                Image.asset(
-                                  'assets/images/playing.gif',
-                                  color: Theme.of(context).colorScheme.primary,
-                                  height: 12,
-                                ),
-                                const SizedBox(width: 6)
-                              ],
-                              Expanded(
-                                  child: Text(
-                                road.identifier[count0 - 1],
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    color: (count0 ==
-                                                videoPageController
-                                                    .selectedEpisode.episode &&
-                                            visibleRoad ==
-                                                videoPageController
-                                                    .selectedEpisode.road)
-                                        ? Theme.of(context).colorScheme.primary
-                                        : Theme.of(context)
-                                            .colorScheme
-                                            .onSurface),
-                              )),
-                              _buildDownloadStatusIcon(count0, urlItem),
-                              const SizedBox(width: 2),
+        if (visibleRoad >= 0 &&
+            visibleRoad < videoPageController.roadList.length) {
+          final road = videoPageController.roadList[visibleRoad];
+          int count = 1;
+          for (var urlItem in road.data) {
+            int count0 = count;
+            cardList.add(Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              child: Material(
+                color: Theme.of(context).colorScheme.onInverseSurface,
+                borderRadius: BorderRadius.circular(6),
+                clipBehavior: Clip.hardEdge,
+                child: InkWell(
+                  onTap: () async {
+                    if (count0 == videoPageController.selectedEpisode.episode &&
+                        videoPageController.selectedEpisode.road ==
+                            visibleRoad) {
+                      return;
+                    }
+                    KazumiLogger()
+                        .i('VideoPageController: video URL is $urlItem');
+                    _closeTabBodyAnimated();
+                    changeEpisode(count0, currentRoad: visibleRoad);
+                  },
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: [
+                            if (count0 ==
+                                    (videoPageController
+                                        .selectedEpisode.episode) &&
+                                visibleRoad ==
+                                    videoPageController
+                                        .selectedEpisode.road) ...<Widget>[
+                              Image.asset(
+                                'assets/images/playing.gif',
+                                color: Theme.of(context).colorScheme.primary,
+                                height: 12,
+                              ),
+                              const SizedBox(width: 6)
                             ],
-                          ),
-                          const SizedBox(height: 3),
-                        ],
-                      ),
+                            Expanded(
+                                child: Text(
+                              road.identifier[count0 - 1],
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: (count0 ==
+                                              videoPageController
+                                                  .selectedEpisode.episode &&
+                                          visibleRoad ==
+                                              videoPageController
+                                                  .selectedEpisode.road)
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .onSurface),
+                            )),
+                            _buildDownloadStatusIcon(count0, urlItem),
+                            const SizedBox(width: 2),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                      ],
                     ),
                   ),
                 ),
-              ));
-              count++;
-            }
+              ),
+            ));
+            count++;
           }
         }
         return Expanded(

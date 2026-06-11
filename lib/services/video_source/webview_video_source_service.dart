@@ -12,10 +12,10 @@ class WebViewVideoSourceService implements IVideoSourceService {
   VideoWebviewController? _webview;
   StreamSubscription? _logSubscription;
 
-  /// 单个服务实例不能实现并发解析，单个服务实例只能持有一个 WebView。
-  /// 服务可以在正在进行的解析未完成时，取消该解析并开始新的解析。
-  /// 通过递增 ID 标识最新请求，取消旧请求
-  int _resolveId = 0;
+  // 单个服务实例持有一个 WebView，因此解析任务按实例串行执行。
+  // 下载并行通过多个服务实例实现。
+  Future<void>? _resolveTail = Future<void>.value();
+  _ResolveRequest? _activeRequest;
 
   final StreamController<String> _logController =
       StreamController<String>.broadcast();
@@ -28,8 +28,37 @@ class WebViewVideoSourceService implements IVideoSourceService {
     int offset = 0,
     Duration timeout = const Duration(seconds: 15),
   }) async {
-    _resolveId++;
-    final currentResolveId = _resolveId;
+    final resolveTail = _resolveTail;
+    if (resolveTail == null) {
+      throw const VideoSourceCancelledException();
+    }
+
+    _activeRequest?.cancel();
+    final request = _ResolveRequest();
+    _activeRequest = request;
+
+    final resolveFuture = resolveTail.then(
+      (_) => _runResolve(
+        request,
+        episodeUrl,
+        useLegacyParser: useLegacyParser,
+        offset: offset,
+        timeout: timeout,
+      ),
+    );
+
+    _resolveTail = resolveFuture.then<void>((_) {}, onError: (_) {});
+    return resolveFuture;
+  }
+
+  Future<VideoSource> _runResolve(
+    _ResolveRequest request,
+    String episodeUrl, {
+    required bool useLegacyParser,
+    required int offset,
+    required Duration timeout,
+  }) async {
+    request.throwIfNotCurrent(_activeRequest);
 
     if (_webview == null) {
       _webview = VideoWebviewControllerFactory.getController();
@@ -42,30 +71,31 @@ class WebViewVideoSourceService implements IVideoSourceService {
       });
     }
 
+    var didStartLoad = false;
     try {
+      request.throwIfNotCurrent(_activeRequest);
+      didStartLoad = true;
       await _webview!.loadUrl(
         episodeUrl,
         useLegacyParser,
         offset: offset,
       );
 
-      if (currentResolveId != _resolveId) {
-        throw const VideoSourceCancelledException();
-      }
+      request.throwIfNotCurrent(_activeRequest);
 
-      final event = await _webview!.onVideoURLParser.first.timeout(
+      final parserFuture = _webview!.onVideoURLParser.first.timeout(
         timeout,
         onTimeout: () {
-          if (currentResolveId != _resolveId) {
-            throw const VideoSourceCancelledException();
-          }
+          request.throwIfNotCurrent(_activeRequest);
           throw VideoSourceTimeoutException(timeout);
         },
       );
-
-      if (currentResolveId != _resolveId) {
+      final cancelFuture = request.cancelled.then<(String, int)>((_) {
         throw const VideoSourceCancelledException();
-      }
+      });
+      final event = await Future.any([parserFuture, cancelFuture]);
+
+      request.throwIfNotCurrent(_activeRequest);
 
       return VideoSource(
         url: event.$1,
@@ -76,29 +106,54 @@ class WebViewVideoSourceService implements IVideoSourceService {
       if (e is VideoSourceCancelledException) {
         rethrow;
       }
-      if (currentResolveId != _resolveId) {
-        throw const VideoSourceCancelledException();
-      }
+      request.throwIfNotCurrent(_activeRequest);
       rethrow;
     } finally {
-      if (currentResolveId == _resolveId) {
+      if (didStartLoad) {
         await _webview?.unloadPage();
+      }
+      if (identical(_activeRequest, request)) {
+        _activeRequest = null;
       }
     }
   }
 
   @override
   void cancel() {
-    _resolveId++;
+    _activeRequest?.cancel();
   }
 
   @override
-  void dispose() {
+  Future<void> dispose() async {
+    final resolveTail = _resolveTail;
+    _resolveTail = null;
     cancel();
-    _logSubscription?.cancel();
+    await resolveTail;
+    _activeRequest = null;
+    await _logSubscription?.cancel();
     _logSubscription = null;
-    _logController.close();
-    _webview?.dispose();
+    if (!_logController.isClosed) {
+      await _logController.close();
+    }
+    await _webview?.dispose();
     _webview = null;
+  }
+}
+
+class _ResolveRequest {
+  final Completer<void> _cancelled = Completer<void>();
+
+  Future<void> get cancelled => _cancelled.future;
+
+  void cancel() {
+    if (!_cancelled.isCompleted) {
+      _cancelled.complete();
+    }
+  }
+
+  void throwIfNotCurrent(_ResolveRequest? current) {
+    if (_cancelled.isCompleted || !identical(current, this)) {
+      throw const VideoSourceCancelledException();
+    }
   }
 }

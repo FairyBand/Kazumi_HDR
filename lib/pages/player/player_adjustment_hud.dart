@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:kazumi/utils/format.dart';
 
@@ -121,7 +119,7 @@ class _PlayerAdjustmentHudState extends State<PlayerAdjustmentHud> {
     final accent = _accent(colorScheme);
     final container = _container(colorScheme);
     final onContainer = _onContainer(colorScheme);
-    final surface = colorScheme.surfaceContainerHighest.withValues(alpha: 0.74);
+    final surface = colorScheme.surfaceContainerHighest;
     final border = colorScheme.outlineVariant.withValues(alpha: 0.34);
     final duration = widget.disableAnimations
         ? Duration.zero
@@ -153,106 +151,105 @@ class _PlayerAdjustmentHudState extends State<PlayerAdjustmentHud> {
             curve: Curves.easeOutBack,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(30),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: AnimatedContainer(
-                  duration: duration,
-                  curve: Curves.easeOutCubic,
-                  width: 200,
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                  decoration: BoxDecoration(
-                    color: surface,
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: border),
-                    boxShadow: [
-                      BoxShadow(
-                        color: accent.withValues(
-                          alpha: widget.visible ? 0.24 : 0,
-                        ),
-                        blurRadius: 32,
-                        spreadRadius: 1,
+              // Avoid BackdropFilter/ImageFilter.blur: it can trigger Impeller
+              // native aborts when HUD saveLayers are drawn over video output.
+              // See flutter/flutter#185506.
+              child: AnimatedContainer(
+                duration: duration,
+                curve: Curves.easeOutCubic,
+                width: 200,
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                decoration: BoxDecoration(
+                  color: surface,
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accent.withValues(
+                        alpha: widget.visible ? 0.24 : 0,
                       ),
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.28),
-                        blurRadius: 24,
-                        offset: const Offset(0, 12),
+                      blurRadius: 32,
+                      spreadRadius: 1,
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.28),
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedContainer(
+                      duration: duration,
+                      curve: Curves.easeOutCubic,
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: container,
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AnimatedContainer(
+                      child: AnimatedSwitcher(
                         duration: duration,
-                        curve: Curves.easeOutCubic,
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: container.withValues(alpha: 0.92),
-                          borderRadius: BorderRadius.circular(20),
+                        switchInCurve: Curves.easeOutBack,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder: (child, animation) {
+                          return ScaleTransition(
+                            scale: animation,
+                            child: FadeTransition(
+                              opacity: animation,
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: Icon(
+                          _icon,
+                          key: ValueKey(_icon),
+                          color: onContainer,
+                          size: 20,
                         ),
-                        child: AnimatedSwitcher(
-                          duration: duration,
-                          switchInCurve: Curves.easeOutBack,
-                          switchOutCurve: Curves.easeInCubic,
-                          transitionBuilder: (child, animation) {
-                            return ScaleTransition(
-                              scale: animation,
-                              child: FadeTransition(
-                                opacity: animation,
-                                child: child,
-                              ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 32,
+                          activeTrackColor: _activeTraker(colorScheme),
+                          inactiveTrackColor: _inactiveTraker(colorScheme),
+                          thumbColor: _activeTraker(colorScheme),
+                          overlayShape: SliderComponentShape.noOverlay,
+                          trackShape: const _HudSliderTrackShape(
+                            outerRadius: 12,
+                            innerRadius: 2,
+                            thumbGap: 12,
+                            edgeInset: 6,
+                          ),
+                          thumbShape: const _HudSliderThumbShape(
+                            width: 4,
+                            height: 40,
+                            cornerRadius: 2,
+                          ),
+                          tickMarkShape: SliderTickMarkShape.noTickMark,
+                          padding: EdgeInsets.zero,
+                        ),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween<double>(end: _progress),
+                          duration: widget.disableAnimations || snapProgress
+                              ? Duration.zero
+                              : const Duration(milliseconds: 180),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, animatedProgress, child) {
+                            return Slider(
+                              value: animatedProgress,
+                              onChanged: (_) {},
                             );
                           },
-                          child: Icon(
-                            _icon,
-                            key: ValueKey(_icon),
-                            color: onContainer,
-                            size: 20,
-                          ),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: SliderTheme(
-                          data: SliderThemeData(
-                            trackHeight: 32,
-                            activeTrackColor: _activeTraker(colorScheme),
-                            inactiveTrackColor: _inactiveTraker(colorScheme),
-                            thumbColor: _activeTraker(colorScheme),
-                            overlayShape: SliderComponentShape.noOverlay,
-                            trackShape: const _HudSliderTrackShape(
-                              outerRadius: 12,
-                              innerRadius: 2,
-                              thumbGap: 12,
-                              edgeInset: 6,
-                            ),
-                            thumbShape: const _HudSliderThumbShape(
-                              width: 4,
-                              height: 40,
-                              cornerRadius: 2,
-                            ),
-                            tickMarkShape: SliderTickMarkShape.noTickMark,
-                            padding: EdgeInsets.zero,
-                          ),
-                          child: TweenAnimationBuilder<double>(
-                            tween: Tween<double>(end: _progress),
-                            duration: widget.disableAnimations || snapProgress
-                                ? Duration.zero
-                                : const Duration(milliseconds: 180),
-                            curve: Curves.easeOutCubic,
-                            builder: (context, animatedProgress, child) {
-                              return Slider(
-                                value: animatedProgress,
-                                onChanged: (_) {},
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -611,8 +608,8 @@ class _PlayerSeekHudState extends State<PlayerSeekHud> {
     final accent = colorScheme.secondaryContainer;
     final container = colorScheme.secondary;
     final onContainer = colorScheme.onSecondary;
-    final progressFill = colorScheme.secondaryContainer.withValues(alpha: 0.46);
-    final surface = colorScheme.surfaceContainerHighest.withValues(alpha: 0.74);
+    final progressFill = colorScheme.secondaryContainer;
+    final surface = colorScheme.surfaceContainerHighest;
     final border = colorScheme.outlineVariant.withValues(alpha: 0.34);
     final duration = widget.disableAnimations
         ? Duration.zero
@@ -647,123 +644,123 @@ class _PlayerSeekHudState extends State<PlayerSeekHud> {
             curve: Curves.easeOutBack,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(30),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: AnimatedContainer(
-                  duration: duration,
-                  curve: Curves.easeOutCubic,
-                  width: 248,
-                  decoration: BoxDecoration(
-                    color: surface,
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: border),
-                    boxShadow: [
-                      BoxShadow(
-                        color: accent.withValues(
-                          alpha: widget.visible ? 0.24 : 0,
-                        ),
-                        blurRadius: 32,
-                        spreadRadius: 1,
+              // Avoid BackdropFilter/ImageFilter.blur: it can trigger Impeller
+              // native aborts when HUD saveLayers are drawn over video output.
+              // See flutter/flutter#185506.
+              child: AnimatedContainer(
+                duration: duration,
+                curve: Curves.easeOutCubic,
+                width: 248,
+                decoration: BoxDecoration(
+                  color: surface,
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accent.withValues(
+                        alpha: widget.visible ? 0.24 : 0,
                       ),
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.28),
-                        blurRadius: 24,
-                        offset: const Offset(0, 12),
+                      blurRadius: 32,
+                      spreadRadius: 1,
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.28),
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween<double>(end: _progress),
+                        duration: widget.disableAnimations || snapProgress
+                            ? Duration.zero
+                            : const Duration(milliseconds: 180),
+                        curve: Curves.easeOutCubic,
+                        builder: (context, animatedProgress, child) {
+                          return _SeekProgressBackground(
+                            progress: animatedProgress,
+                            color: progressFill,
+                          );
+                        },
                       ),
-                    ],
-                  ),
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: TweenAnimationBuilder<double>(
-                          tween: Tween<double>(end: _progress),
-                          duration: widget.disableAnimations || snapProgress
-                              ? Duration.zero
-                              : const Duration(milliseconds: 180),
-                          curve: Curves.easeOutCubic,
-                          builder: (context, animatedProgress, child) {
-                            return _SeekProgressBackground(
-                              progress: animatedProgress,
-                              color: progressFill,
-                            );
-                          },
-                        ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 8,
+                        horizontal: 10,
                       ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 10,
-                        ),
-                        child: Row(
-                          children: [
-                            AnimatedContainer(
+                      child: Row(
+                        children: [
+                          AnimatedContainer(
+                            duration: duration,
+                            curve: Curves.easeOutCubic,
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: container,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: AnimatedSwitcher(
                               duration: duration,
-                              curve: Curves.easeOutCubic,
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: container.withValues(alpha: 0.92),
-                                borderRadius: BorderRadius.circular(20),
+                              switchInCurve: Curves.easeOutBack,
+                              switchOutCurve: Curves.easeInCubic,
+                              transitionBuilder: (child, animation) {
+                                return ScaleTransition(
+                                  scale: animation,
+                                  child: FadeTransition(
+                                    opacity: animation,
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: Icon(
+                                icon,
+                                key: ValueKey(icon),
+                                color: onContainer,
+                                size: 22,
                               ),
-                              child: AnimatedSwitcher(
-                                duration: duration,
-                                switchInCurve: Curves.easeOutBack,
-                                switchOutCurve: Curves.easeInCubic,
-                                transitionBuilder: (child, animation) {
-                                  return ScaleTransition(
-                                    scale: animation,
-                                    child: FadeTransition(
-                                      opacity: animation,
-                                      child: child,
-                                    ),
-                                  );
-                                },
-                                child: Icon(
-                                  icon,
-                                  key: ValueKey(icon),
-                                  color: onContainer,
-                                  size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _offsetText,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelLarge
+                                      ?.copyWith(
+                                        color: colorScheme.onSurface,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                 ),
-                              ),
+                                const SizedBox(height: 1),
+                                Text(
+                                  '${durationToString(_displayCurrentPosition)} / ${durationToString(_displayDuration)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    _offsetText,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelLarge
-                                        ?.copyWith(
-                                          color: colorScheme.onSurface,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                  ),
-                                  const SizedBox(height: 1),
-                                  Text(
-                                    '${durationToString(_displayCurrentPosition)} / ${durationToString(_displayDuration)}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          color: colorScheme.onSurfaceVariant,
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -838,14 +835,13 @@ class _PlayerSpeedHudState extends State<PlayerSpeedHud> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final accent = colorScheme.inversePrimary;
     final container = colorScheme.inverseSurface;
     final onContainer = colorScheme.onInverseSurface;
-    final surface = colorScheme.surfaceContainerHighest.withValues(alpha: 0.74);
-    final border = colorScheme.outlineVariant.withValues(alpha: 0.34);
+    final surface = colorScheme.surfaceContainerHighest;
+    final border = colorScheme.outlineVariant.withValues(alpha: 0.22);
     final duration = widget.disableAnimations
         ? Duration.zero
-        : const Duration(milliseconds: 200);
+        : const Duration(milliseconds: 160);
 
     return IgnorePointer(
       child: AnimatedOpacity(
@@ -853,95 +849,67 @@ class _PlayerSpeedHudState extends State<PlayerSpeedHud> {
         duration: duration,
         curve: Curves.easeOutCubic,
         child: AnimatedSlide(
-          offset: widget.visible ? Offset.zero : const Offset(0, -0.18),
+          offset: widget.visible ? Offset.zero : const Offset(0, -0.12),
           duration: duration,
           curve: Curves.easeOutCubic,
           child: AnimatedScale(
-            scale: widget.visible ? 1 : 0.92,
+            scale: widget.visible ? 1 : 0.96,
             duration: duration,
-            curve: Curves.easeOutBack,
+            curve: Curves.easeOutCubic,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(30),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                child: AnimatedContainer(
-                  duration: duration,
-                  curve: Curves.easeOutCubic,
-                  width: 164,
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 7, horizontal: 9),
-                  decoration: BoxDecoration(
-                    color: surface,
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: border),
-                    boxShadow: [
-                      BoxShadow(
-                        color: accent.withValues(
-                          alpha: widget.visible ? 0.24 : 0,
-                        ),
-                        blurRadius: 32,
-                        spreadRadius: 1,
+              borderRadius: BorderRadius.circular(18),
+              // Avoid BackdropFilter/ImageFilter.blur: it can trigger Impeller
+              // native aborts when HUD saveLayers are drawn over video output.
+              // See flutter/flutter#185506.
+              child: AnimatedContainer(
+                duration: duration,
+                curve: Curves.easeOutCubic,
+                width: 94,
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                decoration: BoxDecoration(
+                  color: surface,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      blurRadius: 12,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedContainer(
+                      duration: duration,
+                      curve: Curves.easeOutCubic,
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: container,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.28),
-                        blurRadius: 24,
-                        offset: const Offset(0, 12),
+                      child: Icon(
+                        Icons.speed_rounded,
+                        color: onContainer,
+                        size: 15,
                       ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AnimatedContainer(
-                        duration: duration,
-                        curve: Curves.easeOutCubic,
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: container.withValues(alpha: 0.92),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Icon(
-                          Icons.speed_rounded,
-                          color: onContainer,
-                          size: 20,
-                        ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _speedText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: colorScheme.onSurface,
+                                  fontWeight: FontWeight.w700,
+                                ),
                       ),
-                      const SizedBox(width: 9),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _speedText,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelLarge
-                                  ?.copyWith(
-                                    color: colorScheme.onSurface,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                            const SizedBox(height: 1),
-                            Text(
-                              '倍速播放',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
