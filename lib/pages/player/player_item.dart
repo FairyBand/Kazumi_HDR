@@ -661,11 +661,16 @@ class _PlayerItemState extends State<PlayerItem>
   Future<void> handleSuperResolutionChange(int shaderIndex) async {
     if (!mounted) return;
 
-    if (!Platform.isWindows && shaderIndex >= 4) {
-      KazumiDialog.showToast(message: 'HDR 视频增强仅支持 Windows 平台');
+    final bool isMpvHdrMode = shaderIndex >= 4 && shaderIndex <= 6;
+    final bool isRtxHdrMode = shaderIndex >= 7 && shaderIndex <= 9;
+    final bool supportsMpvHdrPlatform =
+        Platform.isWindows || Platform.isAndroid;
+
+    if (isMpvHdrMode && !supportsMpvHdrPlatform) {
+      KazumiDialog.showToast(message: 'MPV HDR 视频增强仅支持 Windows 和 Android 平台');
       return;
     }
-    if (shaderIndex >= 7 &&
+    if (isRtxHdrMode &&
         !await playerController.playback.ensureSupportsRtxHdr()) {
       KazumiDialog.showToast(message: '当前设备未检测到支持 RTX HDR 的 NVIDIA RTX 显卡');
       await GStorage.putSetting(SettingsKeys.defaultSuperResolutionType, 1);
@@ -673,7 +678,7 @@ class _PlayerItemState extends State<PlayerItem>
     }
 
     // mediacodec_embed 不支持超分辨率
-    if (Platform.isAndroid && shaderIndex != 1) {
+    if (Platform.isAndroid && shaderIndex != 1 && !isMpvHdrMode) {
       final String androidVideoRenderer =
           GStorage.getSetting(SettingsKeys.androidVideoRenderer);
 
@@ -769,13 +774,17 @@ class _PlayerItemState extends State<PlayerItem>
 
   Future<void> _applySuperResolutionChange(int shaderIndex) async {
     final previousType = playerController.playback.superResolutionType;
-    final switchesWindowsHdrPath =
-        Platform.isWindows && ((previousType >= 4) != (shaderIndex >= 4));
+    final previousUsesNativeHdrPath = Platform.isWindows && previousType >= 4 ||
+        Platform.isAndroid && previousType >= 4 && previousType <= 6;
+    final nextUsesNativeHdrPath = Platform.isWindows && shaderIndex >= 4 ||
+        Platform.isAndroid && shaderIndex >= 4 && shaderIndex <= 6;
+    final switchesNativeHdrPath =
+        previousUsesNativeHdrPath != nextUsesNativeHdrPath;
 
     await GStorage.putSetting(
         SettingsKeys.defaultSuperResolutionType, shaderIndex);
 
-    if (switchesWindowsHdrPath) {
+    if (switchesNativeHdrPath) {
       final selection = videoPageController.playbackEpisode;
       final offset = playerController.playback.playerPosition.inSeconds;
       KazumiDialog.showToast(message: '正在切换 HDR 渲染路径...');

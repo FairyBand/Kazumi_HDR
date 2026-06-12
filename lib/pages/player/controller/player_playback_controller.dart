@@ -1,7 +1,6 @@
 // ignore_for_file: library_private_types_in_public_api
 
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
@@ -181,8 +180,7 @@ abstract class _PlayerPlaybackController with Store {
     superResolutionType =
         GStorage.getSetting(SettingsKeys.defaultSuperResolutionType);
     supportsRtxHdr = await ensureSupportsRtxHdr();
-    if ((!Platform.isWindows && _isWindowsNativeHdrType(superResolutionType)) ||
-        (_isRtxHdrType(superResolutionType) && !supportsRtxHdr)) {
+    if (!_isHdrTypeSupportedOnCurrentPlatform(superResolutionType)) {
       superResolutionType = 1;
       await GStorage.putSetting(SettingsKeys.defaultSuperResolutionType, 1);
     }
@@ -198,7 +196,7 @@ abstract class _PlayerPlaybackController with Store {
       configuration: PlayerConfiguration(
         vo: 'null',
         bufferSize: lowMemoryMode ? 15 * 1024 * 1024 : 1500 * 1024 * 1024,
-        osc: Platform.isWindows && _isWindowsNativeHdrType(superResolutionType),
+        osc: _usesWindowsNativeHdrPath(superResolutionType),
         logLevel: MPVLogLevel.values[debug.playerLogLevel],
         adBlocker: adBlockerEnabled,
       ),
@@ -285,12 +283,19 @@ abstract class _PlayerPlaybackController with Store {
       }
     }
 
+    if (_usesAndroidNativeMpvHdrPath(superResolutionType)) {
+      videoRenderer = 'gpu-next';
+      hAenable = true;
+      hardwareDecoder = 'mediacodec';
+      KazumiLogger().i('Player: Android native Surface gpu-next HDR requested');
+    }
+
     if (videoRenderer == 'mediacodec_embed') {
       hAenable = true;
       hardwareDecoder = 'mediacodec';
       superResolutionType = 1;
     }
-    if (Platform.isWindows && _isWindowsNativeHdrType(superResolutionType)) {
+    if (_usesWindowsNativeHdrPath(superResolutionType)) {
       videoRenderer = 'gpu-next';
       hAenable = true;
       hardwareDecoder = 'd3d11va';
@@ -319,10 +324,9 @@ abstract class _PlayerPlaybackController with Store {
         vo: videoRenderer,
         enableHardwareAcceleration: hAenable,
         hwdec: hAenable ? hardwareDecoder : 'no',
-        windowsNativeWindow:
-            Platform.isWindows && _isWindowsNativeHdrType(superResolutionType),
-        windowsNativeRtxHdr:
-            Platform.isWindows && _isRtxHdrType(superResolutionType),
+        windowsNativeWindow: _usesWindowsNativeHdrPath(superResolutionType),
+        windowsNativeRtxHdr: _usesWindowsNativeHdrPath(superResolutionType) &&
+            _isRtxHdrType(superResolutionType),
         androidAttachSurfaceAfterVideoParameters: false,
       ),
     );
@@ -380,7 +384,7 @@ abstract class _PlayerPlaybackController with Store {
       {bool synchronized = true, Player? player}) async {
     final currentPlayer = player ?? mediaPlayer;
     if (currentPlayer == null) return;
-    if (!Platform.isWindows && _isWindowsNativeHdrType(type)) {
+    if (_isMpvHdrType(type) && !_isMpvHdrSupportedOnCurrentPlatform()) {
       type = 1;
     }
     if (_isRtxHdrType(type) && !await ensureSupportsRtxHdr()) {
@@ -421,8 +425,7 @@ abstract class _PlayerPlaybackController with Store {
         return;
       }
       if (_isMpvHdrType(type)) {
-        await pp.setProperty("gpu-api", "d3d11");
-        await pp.setProperty("hwdec", "d3d11va");
+        await _setMpvHdrRendererOptions(pp);
         if (_usesAnime4KLite(type)) {
           await pp.command([
             'change-list',
@@ -501,6 +504,28 @@ abstract class _PlayerPlaybackController with Store {
     return _isMpvHdrType(type) || _isRtxHdrType(type);
   }
 
+  bool _isMpvHdrSupportedOnCurrentPlatform() {
+    return Platform.isWindows || Platform.isAndroid;
+  }
+
+  bool _isHdrTypeSupportedOnCurrentPlatform(int type) {
+    if (_isMpvHdrType(type)) {
+      return _isMpvHdrSupportedOnCurrentPlatform();
+    }
+    if (_isRtxHdrType(type)) {
+      return Platform.isWindows && supportsRtxHdr;
+    }
+    return true;
+  }
+
+  bool _usesWindowsNativeHdrPath(int type) {
+    return Platform.isWindows && _isWindowsNativeHdrType(type);
+  }
+
+  bool _usesAndroidNativeMpvHdrPath(int type) {
+    return Platform.isAndroid && _isMpvHdrType(type);
+  }
+
   Future<bool> ensureSupportsRtxHdr() async {
     if (!Platform.isWindows) {
       supportsRtxHdr = false;
@@ -511,7 +536,7 @@ abstract class _PlayerPlaybackController with Store {
   }
 
   bool get usesWindowsNativeHdr =>
-      Platform.isWindows && _isWindowsNativeHdrType(superResolutionType);
+      _usesWindowsNativeHdrPath(superResolutionType);
 
   bool _usesAnime4KLite(int type) {
     return type == 2 || type == 5 || type == 8;
@@ -580,10 +605,24 @@ abstract class _PlayerPlaybackController with Store {
     await pp.setProperty("target-trc", "auto");
     await pp.setProperty("target-colorspace-hint", "auto");
     await pp.setProperty("target-colorspace-hint-strict", "yes");
-    await pp.setProperty("d3d11-output-format", "auto");
-    await pp.setProperty("d3d11-output-csp", "auto");
+    if (Platform.isWindows) {
+      await pp.setProperty("d3d11-output-format", "auto");
+      await pp.setProperty("d3d11-output-csp", "auto");
+    }
     await pp.setProperty("video-sync", "audio");
     await pp.setProperty("interpolation", "no");
+  }
+
+  Future<void> _setMpvHdrRendererOptions(NativePlayer pp) async {
+    if (Platform.isWindows) {
+      await pp.setProperty("gpu-api", "d3d11");
+      await pp.setProperty("hwdec", "d3d11va");
+      return;
+    }
+    if (Platform.isAndroid) {
+      await pp.setProperty("gpu-api", "vulkan,opengl");
+      await pp.setProperty("hwdec", "mediacodec");
+    }
   }
 
   Future<void> _setRtxHdrCandidateOutput(NativePlayer pp) async {

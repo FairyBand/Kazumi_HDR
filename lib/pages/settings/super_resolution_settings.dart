@@ -28,7 +28,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
   void initState() {
     super.initState();
     final int selectedType = int.tryParse(superResolutionType.value) ?? 1;
-    if (!Platform.isWindows && selectedType >= 4) {
+    if (_shouldResetInitialType(selectedType)) {
       superResolutionType.value = '1';
       GStorage.putSetting(SettingsKeys.defaultSuperResolutionType, 1);
     }
@@ -52,11 +52,33 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
     return isChineseLocale(context) ? zh : en;
   }
 
+  bool _isMpvHdrType(int type) {
+    return type >= 4 && type <= 6;
+  }
+
+  bool _isRtxHdrType(int type) {
+    return type >= 7 && type <= 9;
+  }
+
+  bool _supportsMpvHdrPlatform() {
+    return Platform.isWindows || Platform.isAndroid;
+  }
+
+  bool _shouldResetInitialType(int type) {
+    if (_isMpvHdrType(type)) {
+      return !_supportsMpvHdrPlatform();
+    }
+    if (_isRtxHdrType(type)) {
+      return !Platform.isWindows;
+    }
+    return false;
+  }
+
   Future<void> _loadRtxGpuSupport() async {
     final supported = await PlatformEnvironmentService.hasSupportedRtxGpu();
     if (!mounted) return;
     final int selectedType = int.tryParse(superResolutionType.value) ?? 1;
-    if (!supported && selectedType >= 7) {
+    if (!supported && _isRtxHdrType(selectedType)) {
       superResolutionType.value = '1';
       await GStorage.putSetting(SettingsKeys.defaultSuperResolutionType, 1);
     }
@@ -213,6 +235,8 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
   Widget build(BuildContext context) {
     final fontFamily = Theme.of(context).textTheme.bodyMedium?.fontFamily;
     final isZh = isChineseLocale(context);
+    final bool supportsMpvHdr = _supportsMpvHdrPlatform();
+    final bool supportsRtxHdrOptions = Platform.isWindows && supportsRtxHdr;
     return Scaffold(
       appBar: SysAppBar(
         title: Text(isZh ? '超分辨率' : 'Super Resolution'),
@@ -223,8 +247,8 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
           SettingsSection(
             title: Text(
               isZh
-                  ? '超分辨率需要启用硬件解码；HDR 增强选项仅在 Windows HDR 环境下可用'
-                  : 'Super resolution requires hardware decoding; HDR options require Windows HDR',
+                  ? '超分辨率需要启用硬件解码；MPV HDR 支持 Windows / Android，RTX HDR 仅支持 Windows NVIDIA RTX'
+                  : 'Super resolution requires hardware decoding; MPV HDR supports Windows/Android, RTX HDR requires Windows NVIDIA RTX',
               style: TextStyle(fontFamily: fontFamily),
             ),
             tiles: [
@@ -261,7 +285,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
                 value: '3',
                 fontFamily: fontFamily,
               ),
-              if (Platform.isWindows) ...[
+              if (supportsMpvHdr) ...[
                 superResolutionTile(
                   context: context,
                   title: 'MPV SDR->HDR',
@@ -295,7 +319,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
                   value: '6',
                   fontFamily: fontFamily,
                 ),
-                if (supportsRtxHdr) ...[
+                if (supportsRtxHdrOptions) ...[
                   superResolutionTile(
                     context: context,
                     title: 'RTX HDR',
@@ -349,7 +373,7 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
                     style: TextStyle(fontFamily: fontFamily),
                   ),
                 ),
-                if (supportsRtxHdr)
+                if (supportsRtxHdrOptions)
                   SettingsTile.navigation(
                     onPressed: (_) async {
                       await updateRtxHdrMaxLuma();
