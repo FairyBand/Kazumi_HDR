@@ -2,7 +2,7 @@
 
 [![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=flat&logo=telegram&logoColor=white)](https://t.me/kazumi_app)
 
-使用 Flutter 开发的基于自定义规则的番剧采集与在线观看程序。使用最多五行基于 `Xpath` 语法的选择器构建自己的规则。支持规则导入与规则分享。支持基于 `Anime4K` 的实时超分辨率和 SDR 转 HDR（目前仅限 Windows，支持 MPV 内置映射和 NVIDIA RTX HDR）。绝赞开发中 (～￣▽￣)～
+使用 Flutter 开发的基于自定义规则的番剧采集与在线观看程序。使用最多五行基于 `Xpath` 语法的选择器构建自己的规则。支持规则导入与规则分享。支持基于 `Anime4K` 的实时超分辨率和 SDR 转 HDR（目前支持 Windows 与 Android，支持 MPV 内置映射和 NVIDIA RTX HDR（仅Windows））。绝赞开发中 (～￣▽￣)～
 
 ## 支持平台
 
