@@ -42,6 +42,8 @@ abstract class _PlayerPlaybackController with Store {
   final PlayerScreenshotService screenshotService =
       const PlayerScreenshotService();
 
+  bool? _androidHdrWindowModeEnabled;
+
   Player? mediaPlayer;
   VideoController? videoController;
 
@@ -184,6 +186,9 @@ abstract class _PlayerPlaybackController with Store {
       superResolutionType = 1;
       await GStorage.putSetting(SettingsKeys.defaultSuperResolutionType, 1);
     }
+    await _setAndroidHdrWindowMode(
+      _usesAndroidNativeMpvHdrPath(superResolutionType),
+    );
     hAenable = GStorage.getSetting(SettingsKeys.hAenable);
     androidEnableOpenSLES =
         GStorage.getSetting(SettingsKeys.androidEnableOpenSLES);
@@ -327,6 +332,8 @@ abstract class _PlayerPlaybackController with Store {
         windowsNativeWindow: _usesWindowsNativeHdrPath(superResolutionType),
         windowsNativeRtxHdr: _usesWindowsNativeHdrPath(superResolutionType) &&
             _isRtxHdrType(superResolutionType),
+        androidNativeSurfaceView:
+            _usesAndroidNativeMpvHdrPath(superResolutionType),
         androidAttachSurfaceAfterVideoParameters: false,
       ),
     );
@@ -398,6 +405,9 @@ abstract class _PlayerPlaybackController with Store {
       if (!identical(mediaPlayer, currentPlayer)) {
         return;
       }
+      if (!_usesAndroidNativeMpvHdrPath(type)) {
+        await _setAndroidHdrWindowMode(false);
+      }
       if (type == 2) {
         await _setMpvHdrOutput(pp, enabled: false);
         await pp.command(['change-list', 'vf', 'clr', '']);
@@ -425,6 +435,7 @@ abstract class _PlayerPlaybackController with Store {
         return;
       }
       if (_isMpvHdrType(type)) {
+        await _setAndroidHdrWindowMode(true);
         await _setMpvHdrRendererOptions(pp);
         if (_usesAnime4KLite(type)) {
           await pp.command([
@@ -441,17 +452,13 @@ abstract class _PlayerPlaybackController with Store {
             _buildShaderChain(shaders: mpvAnime4KShaders),
           ]);
         } else {
-          await pp.command([
-            'change-list',
-            'glsl-shaders',
-            'set',
-            _buildShaderChain(),
-          ]);
+          await pp.command(['change-list', 'glsl-shaders', 'clr', '']);
         }
         await _setMpvHdrOutput(pp, enabled: true);
         superResolutionType = type;
         return;
       }
+      await _setAndroidHdrWindowMode(false);
       if (_isRtxHdrType(type)) {
         await pp.setProperty("gpu-api", "d3d11");
         await pp.setProperty("hwdec", "d3d11va");
@@ -526,6 +533,21 @@ abstract class _PlayerPlaybackController with Store {
     return Platform.isAndroid && _isMpvHdrType(type);
   }
 
+  Future<void> _setAndroidHdrWindowMode(bool enabled) async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+    if (_androidHdrWindowModeEnabled == enabled) {
+      return;
+    }
+    final applied = await PlatformEnvironmentService.setAndroidHdrMode(enabled);
+    _androidHdrWindowModeEnabled = enabled;
+    KazumiLogger().i(
+      'Player: Android HDR window mode ${enabled ? 'enabled' : 'disabled'}'
+      ' result=$applied',
+    );
+  }
+
   Future<bool> ensureSupportsRtxHdr() async {
     if (!Platform.isWindows) {
       supportsRtxHdr = false;
@@ -538,6 +560,9 @@ abstract class _PlayerPlaybackController with Store {
   bool get usesWindowsNativeHdr =>
       _usesWindowsNativeHdrPath(superResolutionType);
 
+  bool get usesAndroidNativeMpvHdr =>
+      _usesAndroidNativeMpvHdrPath(superResolutionType);
+
   bool _usesAnime4KLite(int type) {
     return type == 2 || type == 5 || type == 8;
   }
@@ -548,7 +573,7 @@ abstract class _PlayerPlaybackController with Store {
 
   String _buildShaderChain({
     List<String> shaders = const [],
-    bool includeMpvHdr = true,
+    bool includeMpvHdr = false,
   }) {
     return buildShadersAbsolutePath(
       shaderAssetService.shadersDirectory.path,
@@ -569,16 +594,21 @@ abstract class _PlayerPlaybackController with Store {
       if (clearVideoFilters) {
         await pp.command(['change-list', 'vf', 'clr', '']);
       }
-      await pp.setProperty("target-trc", "pq");
-      await pp.setProperty("target-prim", "bt.2020");
-      await pp.setProperty("target-peak", _mpvHdrTargetPeak().toString());
+      await pp.setProperty("target-trc", Platform.isAndroid ? "hlg" : "pq");
+      await pp.setProperty(
+        "target-prim",
+        Platform.isAndroid ? "display-p3" : "bt.2020",
+      );
+      await pp.setProperty("target-colorspace-hint", "yes");
+      await pp.setProperty("target-colorspace-hint-strict", "no");
+      await pp.setProperty("target-peak", await _mpvHdrTargetPeak());
       await pp.setProperty("hdr-reference-white", "203");
-      await pp.setProperty("hdr-compute-peak", "yes");
-      await pp.setProperty("hdr-peak-percentile", "99.9");
+      await pp.setProperty("hdr-compute-peak", "no");
+      await pp.setProperty("hdr-peak-percentile", "100.0");
       await pp.setProperty("hdr-peak-decay-rate", "20.0");
       await pp.setProperty("tone-mapping", "spline");
-      await pp.setProperty("gamut-mapping-mode", "darken");
-      await pp.setProperty("hdr-contrast-recovery", "0.3");
+      await pp.setProperty("gamut-mapping-mode", "clip");
+      await pp.setProperty("hdr-contrast-recovery", "0.0");
       await pp.setProperty("hdr-contrast-smoothness", "3.5");
       await pp.setProperty("inverse-tone-mapping", "yes");
       await pp.setProperty("video-sync", "display-resample");
@@ -620,7 +650,7 @@ abstract class _PlayerPlaybackController with Store {
       return;
     }
     if (Platform.isAndroid) {
-      await pp.setProperty("gpu-api", "vulkan,opengl");
+      await pp.setProperty("gpu-api", "vulkan");
       await pp.setProperty("hwdec", "mediacodec");
     }
   }
@@ -694,10 +724,28 @@ abstract class _PlayerPlaybackController with Store {
     }
   }
 
-  int _mpvHdrTargetPeak() {
-    return GStorage.getSetting(SettingsKeys.mpvHdrTargetPeak)
-        .clamp(100, 10000)
-        .toInt();
+  Future<String> _mpvHdrTargetPeak() async {
+    final configuredTargetPeak =
+        GStorage.getSetting(SettingsKeys.mpvHdrTargetPeak)
+            .clamp(100, 10000)
+            .toInt();
+    if (Platform.isAndroid) {
+      final capabilities =
+          await PlatformEnvironmentService.getAndroidHdrDisplayCapabilities();
+      final detectedPeak = capabilities?.maxLuminance?.round();
+      final detectedAveragePeak = capabilities?.maxAverageLuminance?.round();
+      final androidTargetPeak =
+          (detectedPeak ?? detectedAveragePeak)?.clamp(100, 10000).toInt();
+      if (androidTargetPeak != null) {
+        KazumiLogger().i(
+          'Player: Android HDR display capabilities max=$detectedPeak nit'
+          ' avg=$detectedAveragePeak nit'
+          ' using targetPeak=$androidTargetPeak nit',
+        );
+        return androidTargetPeak.toString();
+      }
+    }
+    return configuredTargetPeak.toString();
   }
 
   String _rtxHdrFilter() {
@@ -828,6 +876,7 @@ abstract class _PlayerPlaybackController with Store {
     try {
       await player?.dispose();
     } catch (_) {}
+    await _setAndroidHdrWindowMode(false);
   }
 
   Future<void> stop() async {
@@ -840,6 +889,7 @@ abstract class _PlayerPlaybackController with Store {
       await player?.dispose();
       loading = true;
     } catch (_) {}
+    await _setAndroidHdrWindowMode(false);
   }
 
   Future<Uint8List?> screenshot({String format = 'image/jpeg'}) async {

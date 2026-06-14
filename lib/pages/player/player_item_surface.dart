@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -23,6 +26,8 @@ class PlayerItemSurface extends StatefulWidget {
 class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
   static const MethodChannel _mediaKitVideoChannel =
       MethodChannel('com.alexmercerind/media_kit_video');
+  static const String _androidNativeSurfaceViewType =
+      'com.alexmercerind/media_kit_video/native_surface_view';
 
   Rect? _lastNativeHdrRect;
   bool? _lastNativeHdrTransparency;
@@ -114,7 +119,7 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
             'VideoOutputManager.SetFlutterOverlayTransparency',
             {'enabled': false},
           ),
-        ]).catchError((_) {}),
+        ]).catchError((_) => <void>[]),
       );
     }
     super.dispose();
@@ -134,6 +139,17 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
           child: const Center(
             child: CircularProgressIndicator(),
           ),
+        );
+      }
+
+      if (playerController.playback.usesAndroidNativeMpvHdr) {
+        return _AndroidNativeSurfaceVideo(
+          playerController: playerController,
+          fit: playerController.panel.aspectRatioType == 1
+              ? BoxFit.contain
+              : playerController.panel.aspectRatioType == 2
+                  ? BoxFit.cover
+                  : BoxFit.fill,
         );
       }
 
@@ -174,5 +190,99 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
         ),
       );
     });
+  }
+}
+
+class _AndroidNativeSurfaceVideo extends StatefulWidget {
+  const _AndroidNativeSurfaceVideo({
+    required this.playerController,
+    required this.fit,
+  });
+
+  final PlayerController playerController;
+  final BoxFit fit;
+
+  @override
+  State<_AndroidNativeSurfaceVideo> createState() =>
+      _AndroidNativeSurfaceVideoState();
+}
+
+class _AndroidNativeSurfaceVideoState
+    extends State<_AndroidNativeSurfaceVideo> {
+  Future<int>? _handleFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _handleFuture = widget.playerController.playback.mediaPlayer?.handle;
+  }
+
+  @override
+  void didUpdateWidget(_AndroidNativeSurfaceVideo oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldPlayer = oldWidget.playerController.playback.mediaPlayer;
+    final player = widget.playerController.playback.mediaPlayer;
+    if (!identical(oldPlayer, player)) {
+      _handleFuture = player?.handle;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final videoController = widget.playerController.playback.videoController;
+    final handleFuture = _handleFuture;
+    if (videoController == null || handleFuture == null) {
+      return const ColoredBox(color: Colors.black);
+    }
+
+    return FutureBuilder<int>(
+      future: handleFuture,
+      builder: (context, snapshot) {
+        final handle = snapshot.data;
+        if (handle == null) {
+          return const ColoredBox(color: Colors.black);
+        }
+        return ValueListenableBuilder<Rect?>(
+          valueListenable: videoController.rect,
+          builder: (context, rect, _) {
+            final width = (rect?.width ?? 1).clamp(1.0, double.infinity);
+            final height = (rect?.height ?? 1).clamp(1.0, double.infinity);
+            return PlatformViewLink(
+              key: ValueKey('android-native-surface-$handle'),
+              viewType: _PlayerItemSurfaceState._androidNativeSurfaceViewType,
+              surfaceFactory: (context, controller) {
+                return AndroidViewSurface(
+                  controller: controller as AndroidViewController,
+                  hitTestBehavior: PlatformViewHitTestBehavior.transparent,
+                  gestureRecognizers: const <Factory<
+                      OneSequenceGestureRecognizer>>{},
+                );
+              },
+              onCreatePlatformView: (params) {
+                return PlatformViewsService.initExpensiveAndroidView(
+                  id: params.id,
+                  viewType: params.viewType,
+                  layoutDirection: TextDirection.ltr,
+                  creationParams: {
+                    'handle': handle.toString(),
+                    'width': width.round().toString(),
+                    'height': height.round().toString(),
+                    'fit': widget.fit.name,
+                  },
+                  creationParamsCodec: const StandardMessageCodec(),
+                  onFocus: () {
+                    params.onFocusChanged(true);
+                  },
+                )
+                  ..addOnPlatformViewCreatedListener(
+                    params.onPlatformViewCreated,
+                  )
+                  ..create();
+              },
+            );
+          },
+        );
+      },
+    );
   }
 }

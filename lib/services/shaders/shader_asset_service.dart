@@ -28,15 +28,17 @@ class ShaderAssetService {
     for (var filePath in shaderFiles) {
       final fileName = filePath.split('/').last;
       final targetFile = File(path.join(shadersDirectory.path, fileName));
-      if (await targetFile.exists()) {
-        KazumiLogger()
-            .i('ShaderManager: GLSL Shader exists, skip: ${targetFile.path}');
-        continue;
-      }
-
       try {
         final data = await rootBundle.load(filePath);
         final List<int> bytes = data.buffer.asUint8List();
+        if (await targetFile.exists()) {
+          final existingBytes = await targetFile.readAsBytes();
+          if (_listEquals(existingBytes, bytes)) {
+            KazumiLogger().i(
+                'ShaderManager: GLSL Shader exists, skip: ${targetFile.path}');
+            continue;
+          }
+        }
         await targetFile.writeAsBytes(bytes);
         copiedFilesCount++;
         KazumiLogger().i('ShaderManager: Copy: ${targetFile.path}');
@@ -47,5 +49,17 @@ class ShaderAssetService {
 
     KazumiLogger().i(
         'ShaderManager: $copiedFilesCount GLSL files copied to ${shadersDirectory.path}');
+  }
+
+  bool _listEquals(List<int> a, List<int> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) {
+        return false;
+      }
+    }
+    return true;
   }
 }

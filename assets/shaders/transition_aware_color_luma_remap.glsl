@@ -3,28 +3,28 @@
 //!TYPE float
 //!MINIMUM 0.0
 //!MAXIMUM 0.6
-0.22
+0.08
 
 //!PARAM warm_luma_boost
 //!DESC Warm color luma boost
 //!TYPE float
 //!MINIMUM 0.0
 //!MAXIMUM 0.4
-0.04
+0.015
 
 //!PARAM dark_color_lift
 //!DESC Dark saturated color lift
 //!TYPE float
 //!MINIMUM 0.0
 //!MAXIMUM 0.4
-0.10
+0.04
 
 //!PARAM transition_soften
 //!DESC Soft transition chroma smoothing
 //!TYPE float
 //!MINIMUM 0.0
 //!MAXIMUM 0.6
-0.12
+0.06
 
 //!PARAM transition_threshold
 //!DESC Soft transition edge threshold
@@ -38,28 +38,28 @@
 //!TYPE float
 //!MINIMUM 0.0
 //!MAXIMUM 0.8
-0.28
+0.08
 
 //!PARAM cool_luma_density
 //!DESC Blue/cyan luma density
 //!TYPE float
 //!MINIMUM 0.0
 //!MAXIMUM 0.5
-0.10
+0.03
 
 //!PARAM pink_chroma_restore
 //!DESC Pale pink chroma restore
 //!TYPE float
 //!MINIMUM 0.0
 //!MAXIMUM 1.2
-0.42
+0.12
 
 //!PARAM pink_luma_density
 //!DESC Pale pink luma density
 //!TYPE float
 //!MINIMUM 0.0
 //!MAXIMUM 0.5
-0.12
+0.04
 
 //!HOOK PREOUTPUT
 //!BIND HOOKED

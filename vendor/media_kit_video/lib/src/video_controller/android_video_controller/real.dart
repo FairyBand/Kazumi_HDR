@@ -45,6 +45,18 @@ class AndroidVideoController extends PlatformVideoController {
     }
   }
 
+  Future<void> _setSurfaceSize(int width, int height) async {
+    final handle = await player.handle;
+    await _channel.invokeMethod(
+      'VideoOutputManager.SetSurfaceSize',
+      {
+        'handle': handle.toString(),
+        'width': width.clamp(1, 1 << 31).toString(),
+        'height': height.clamp(1, 1 << 31).toString(),
+      },
+    );
+  }
+
   /// Listener for updating the --wid property.
   Future<void> widListener() {
     return lock.synchronized(() async {
@@ -85,7 +97,7 @@ class AndroidVideoController extends PlatformVideoController {
   ) {
     wid.addListener(widListener);
     videoParamsSubscription = player.stream.videoParams.listen(
-      (event) => lock.synchronized(() async {
+      (event) async {
         final int width;
         final int height;
         if (event.rotate == 0 || event.rotate == 180) {
@@ -104,28 +116,21 @@ class AndroidVideoController extends PlatformVideoController {
           return;
         }
 
-        final handle = await player.handle;
-
-        await _channel.invokeMethod(
-          'VideoOutputManager.SetSurfaceSize',
-          {
-            'handle': handle.toString(),
-            'width': width.toString(),
-            'height': height.toString(),
-          },
-        );
-
-        rect.value = Rect.fromLTWH(
+        final updatedRect = Rect.fromLTWH(
           0.0,
           0.0,
           width.toDouble(),
           height.toDouble(),
         );
+        rect.value = updatedRect;
+
+        await _setSurfaceSize(width, height);
+        await widListener();
 
         if (!waitUntilFirstFrameRenderedCompleter.isCompleted) {
           waitUntilFirstFrameRenderedCompleter.complete();
         }
-      }),
+      },
     );
   }
 
@@ -184,12 +189,16 @@ class AndroidVideoController extends PlatformVideoController {
     // Store the [VideoController] in the [_controllers].
     _controllers[handle] = controller;
 
-    await _channel.invokeMethod(
-      'VideoOutputManager.Create',
-      {
-        'handle': handle.toString(),
-      },
-    );
+    if (!configuration.androidNativeSurfaceView) {
+      await _channel.invokeMethod(
+        'VideoOutputManager.Create',
+        {
+          'handle': handle.toString(),
+        },
+      );
+    } else {
+      controller.rect.value = const Rect.fromLTWH(0.0, 0.0, 1.0, 1.0);
+    }
 
     await controller.setProperties(
       {
@@ -198,7 +207,7 @@ class AndroidVideoController extends PlatformVideoController {
         'hwdec': configuration.hwdec!,
         'vid': 'auto',
         'force-window': 'yes',
-        'gpu-api': configuration.vo == 'gpu-next' ? 'vulkan,opengl' : 'auto',
+        'gpu-api': configuration.vo == 'gpu-next' ? 'vulkan' : 'auto',
         'sub-use-margins': 'no',
         'sub-font-provider': 'none',
         'sub-scale-with-window': 'yes',
@@ -221,9 +230,12 @@ class AndroidVideoController extends PlatformVideoController {
     int? width,
     int? height,
   }) {
-    throw UnsupportedError(
-      '[AndroidVideoController.setSize] is not available on Android',
-    );
+    return () async {
+      final resolvedWidth = width ?? rect.value?.width.toInt() ?? 1;
+      final resolvedHeight = height ?? rect.value?.height.toInt() ?? 1;
+      await _setSurfaceSize(resolvedWidth, resolvedHeight);
+      await widListener();
+    }();
   }
 
   /// Disposes the instance. Releases allocated resources back to the system.
@@ -246,53 +258,69 @@ class AndroidVideoController extends PlatformVideoController {
   static final _controllers = HashMap<int, AndroidVideoController>();
 
   /// [MethodChannel] for invoking platform specific native implementation.
-  static final _channel =
-      const MethodChannel('com.alexmercerind/media_kit_video')
-        ..setMethodCallHandler(
-          (MethodCall call) async {
-            try {
-              debugPrint(call.method.toString());
-              debugPrint(call.arguments.toString());
-              switch (call.method) {
-                case 'VideoOutput.Resize':
-                  {
-                    // Notify about updated texture ID & [Rect].
-                    final int handle = call.arguments['handle'];
-                    final Rect rect = Rect.fromLTWH(
-                      call.arguments['rect']['left'] * 1.0,
-                      call.arguments['rect']['top'] * 1.0,
-                      call.arguments['rect']['width'] * 1.0,
-                      call.arguments['rect']['height'] * 1.0,
-                    );
-                    final int id = call.arguments['id'];
-                    final int wid = call.arguments['wid'];
-                    _controllers[handle]?.rect.value = rect;
-                    _controllers[handle]?.id.value = id;
-                    _controllers[handle]?.wid.value = wid;
-                    break;
-                  }
-                case 'VideoOutput.WaitUntilFirstFrameRenderedNotify':
-                  {
-                    // Notify about updated texture ID & [Rect].
-                    final int handle = call.arguments['handle'];
-                    debugPrint(handle.toString());
-                    // Notify about the first frame being rendered.
-                    final completer = _controllers[handle]
-                        ?.waitUntilFirstFrameRenderedCompleter;
-                    if (!(completer?.isCompleted ?? true)) {
-                      completer?.complete();
-                    }
-                    break;
-                  }
-                default:
-                  {
-                    break;
-                  }
+  static final _channel = const MethodChannel(
+      'com.alexmercerind/media_kit_video')
+    ..setMethodCallHandler(
+      (MethodCall call) async {
+        try {
+          debugPrint(call.method.toString());
+          debugPrint(call.arguments.toString());
+          switch (call.method) {
+            case 'VideoOutput.Resize':
+              {
+                // Notify about updated texture ID & [Rect].
+                final int handle = call.arguments['handle'];
+                final Rect rect = Rect.fromLTWH(
+                  call.arguments['rect']['left'] * 1.0,
+                  call.arguments['rect']['top'] * 1.0,
+                  call.arguments['rect']['width'] * 1.0,
+                  call.arguments['rect']['height'] * 1.0,
+                );
+                final int id = call.arguments['id'];
+                final int wid = call.arguments['wid'];
+                _controllers[handle]?.rect.value = rect;
+                _controllers[handle]?.id.value = id;
+                _controllers[handle]?.wid.value = wid;
+                break;
               }
-            } catch (exception, stacktrace) {
-              debugPrint(exception.toString());
-              debugPrint(stacktrace.toString());
-            }
-          },
-        );
+            case 'VideoOutput.WaitUntilFirstFrameRenderedNotify':
+              {
+                // Notify about updated texture ID & [Rect].
+                final int handle = call.arguments['handle'];
+                debugPrint(handle.toString());
+                // Notify about the first frame being rendered.
+                final completer =
+                    _controllers[handle]?.waitUntilFirstFrameRenderedCompleter;
+                if (!(completer?.isCompleted ?? true)) {
+                  completer?.complete();
+                }
+                break;
+              }
+            case 'VideoOutput.NativeSurfaceView':
+              {
+                final int handle = call.arguments['handle'];
+                final int wid = call.arguments['wid'];
+                final int width = call.arguments['width'];
+                final int height = call.arguments['height'];
+                final controller = _controllers[handle];
+                if (controller != null) {
+                  controller.wid.value = wid;
+                  if (!controller
+                      .waitUntilFirstFrameRenderedCompleter.isCompleted) {
+                    controller.waitUntilFirstFrameRenderedCompleter.complete();
+                  }
+                }
+                break;
+              }
+            default:
+              {
+                break;
+              }
+          }
+        } catch (exception, stacktrace) {
+          debugPrint(exception.toString());
+          debugPrint(stacktrace.toString());
+        }
+      },
+    );
 }

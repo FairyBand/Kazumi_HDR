@@ -354,25 +354,26 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
                     fontFamily: fontFamily,
                   ),
                 ],
-                SettingsTile.navigation(
-                  onPressed: (_) async {
-                    await updateMpvHdrTargetPeak();
-                  },
-                  title: Text(
-                    isZh ? 'MPV HDR 峰值亮度' : 'MPV HDR peak brightness',
-                    style: TextStyle(fontFamily: fontFamily),
+                if (Platform.isWindows)
+                  SettingsTile.navigation(
+                    onPressed: (_) async {
+                      await updateMpvHdrTargetPeak();
+                    },
+                    title: Text(
+                      isZh ? 'MPV HDR 峰值亮度' : 'MPV HDR peak brightness',
+                      style: TextStyle(fontFamily: fontFamily),
+                    ),
+                    description: Text(
+                      isZh
+                          ? '仅适用于 MPV HDR，对所有显卡均有效。'
+                          : 'Only applies to MPV HDR and works on all GPUs.',
+                      style: TextStyle(fontFamily: fontFamily),
+                    ),
+                    value: Text(
+                      '$mpvHdrTargetPeak nit',
+                      style: TextStyle(fontFamily: fontFamily),
+                    ),
                   ),
-                  description: Text(
-                    isZh
-                        ? '仅适用于 MPV HDR，对所有显卡均有效。'
-                        : 'Only applies to MPV HDR and works on all GPUs.',
-                    style: TextStyle(fontFamily: fontFamily),
-                  ),
-                  value: Text(
-                    '$mpvHdrTargetPeak nit',
-                    style: TextStyle(fontFamily: fontFamily),
-                  ),
-                ),
                 if (supportsRtxHdrOptions)
                   SettingsTile.navigation(
                     onPressed: (_) async {

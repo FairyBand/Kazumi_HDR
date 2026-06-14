@@ -3,6 +3,22 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:kazumi/services/logging/logger.dart';
 
+class AndroidHdrDisplayCapabilities {
+  const AndroidHdrDisplayCapabilities({
+    this.maxLuminance,
+    this.maxAverageLuminance,
+    this.minLuminance,
+    this.supportedHdrTypes = const [],
+  });
+
+  final double? maxLuminance;
+  final double? maxAverageLuminance;
+  final double? minLuminance;
+  final List<int> supportedHdrTypes;
+
+  bool get hasHdrSupport => supportedHdrTypes.isNotEmpty;
+}
+
 class PlatformEnvironmentService {
   PlatformEnvironmentService._();
 
@@ -43,6 +59,81 @@ class PlatformEnvironmentService {
     } on PlatformException catch (e) {
       KazumiLogger().e("Failed to get Android SDK version: '${e.message}'.");
       return 0;
+    }
+  }
+
+  static Future<double?> getAndroidHdrPeakBrightness() async {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+    try {
+      final peak = await _intentChannel
+          .invokeMethod<num?>('getAndroidHdrPeakBrightness');
+      final value = peak?.toDouble();
+      if (value == null || value <= 0 || !value.isFinite) {
+        return null;
+      }
+      return value;
+    } on PlatformException catch (e) {
+      KazumiLogger()
+          .e("Failed to get Android HDR peak brightness: '${e.message}'.");
+      return null;
+    }
+  }
+
+  static Future<AndroidHdrDisplayCapabilities?>
+      getAndroidHdrDisplayCapabilities() async {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+    try {
+      final result = await _intentChannel.invokeMethod<Map<dynamic, dynamic>?>(
+          'getAndroidHdrDisplayCapabilities');
+      if (result == null) {
+        return null;
+      }
+      double? finitePositive(String key) {
+        final value = result[key];
+        if (value is! num) {
+          return null;
+        }
+        final normalized = value.toDouble();
+        return normalized > 0 && normalized.isFinite ? normalized : null;
+      }
+
+      final supportedHdrTypes = (result['supportedHdrTypes'] as List<dynamic>?)
+              ?.whereType<num>()
+              .map((value) => value.toInt())
+              .toList(growable: false) ??
+          const <int>[];
+      final minLuminance = result['minLuminance'];
+      return AndroidHdrDisplayCapabilities(
+        maxLuminance: finitePositive('maxLuminance'),
+        maxAverageLuminance: finitePositive('maxAverageLuminance'),
+        minLuminance: minLuminance is num && minLuminance >= 0
+            ? minLuminance.toDouble()
+            : null,
+        supportedHdrTypes: supportedHdrTypes,
+      );
+    } on PlatformException catch (e) {
+      KazumiLogger()
+          .e("Failed to get Android HDR display capabilities: '${e.message}'.");
+      return null;
+    }
+  }
+
+  static Future<bool> setAndroidHdrMode(bool enabled) async {
+    if (!Platform.isAndroid) {
+      return false;
+    }
+    try {
+      return await _intentChannel.invokeMethod(
+        'setAndroidHdrMode',
+        {'enabled': enabled},
+      );
+    } on PlatformException catch (e) {
+      KazumiLogger().e("Failed to set Android HDR mode: '${e.message}'.");
+      return false;
     }
   }
 

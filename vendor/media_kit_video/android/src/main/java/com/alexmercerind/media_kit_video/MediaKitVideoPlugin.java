@@ -23,6 +23,7 @@ import io.flutter.plugin.common.MethodChannel.Result;
 public class MediaKitVideoPlugin implements FlutterPlugin, MethodCallHandler {
     private MethodChannel channel;
     private VideoOutputManager videoOutputManager;
+    private NativeSurfaceViewOutputManager nativeSurfaceViewOutputManager;
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
@@ -30,6 +31,11 @@ public class MediaKitVideoPlugin implements FlutterPlugin, MethodCallHandler {
         channel.setMethodCallHandler(this);
 
         videoOutputManager = new VideoOutputManager(flutterPluginBinding.getTextureRegistry());
+        nativeSurfaceViewOutputManager = new NativeSurfaceViewOutputManager();
+        flutterPluginBinding.getPlatformViewRegistry().registerViewFactory(
+            "com.alexmercerind/media_kit_video/native_surface_view",
+            new NativeSurfaceViewOutputFactory(channel, nativeSurfaceViewOutputManager)
+        );
 
     }
 
@@ -57,12 +63,14 @@ public class MediaKitVideoPlugin implements FlutterPlugin, MethodCallHandler {
                 final int width = Integer.parseInt(call.argument("width"));
                 final int height = Integer.parseInt(call.argument("height"));
                 videoOutputManager.setSurfaceSize(handle, width, height);
+                nativeSurfaceViewOutputManager.setSurfaceSize(handle, width, height);
                 result.success(null);
                 break;
             }
             case "VideoOutputManager.Dispose": {
                 final long handle = Long.parseLong(call.argument("handle"));
                 videoOutputManager.dispose(handle);
+                nativeSurfaceViewOutputManager.dispose(handle);
                 result.success(null);
                 break;
             }

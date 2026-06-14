@@ -122,6 +122,12 @@ class VideoControllerConfiguration {
   /// * [vo] != gpu : `false`
   final bool? androidAttachSurfaceAfterVideoParameters;
 
+  /// Uses an Android `SurfaceView` platform view as mpv's `--wid` target.
+  ///
+  /// This is intended for Android HDR playback, where Flutter texture
+  /// composition can force the video layer back into SDR.
+  final bool androidNativeSurfaceView;
+
   /// Uses a native Windows child HWND as mpv's --wid target.
   ///
   /// This is intended for Windows HDR experiments that require --vo=gpu-next,
@@ -141,6 +147,7 @@ class VideoControllerConfiguration {
     this.scale = 1.0,
     this.enableHardwareAcceleration = true,
     this.androidAttachSurfaceAfterVideoParameters,
+    this.androidNativeSurfaceView = false,
     this.windowsNativeWindow = false,
     this.windowsNativeRtxHdr = false,
   });
@@ -154,6 +161,7 @@ class VideoControllerConfiguration {
     int? height,
     bool? enableHardwareAcceleration,
     bool? androidAttachSurfaceAfterVideoParameters,
+    bool? androidNativeSurfaceView,
     bool? windowsNativeWindow,
     bool? windowsNativeRtxHdr,
   }) =>
@@ -168,6 +176,8 @@ class VideoControllerConfiguration {
         androidAttachSurfaceAfterVideoParameters:
             androidAttachSurfaceAfterVideoParameters ??
                 this.androidAttachSurfaceAfterVideoParameters,
+        androidNativeSurfaceView:
+            androidNativeSurfaceView ?? this.androidNativeSurfaceView,
         windowsNativeWindow: windowsNativeWindow ?? this.windowsNativeWindow,
         windowsNativeRtxHdr: windowsNativeRtxHdr ?? this.windowsNativeRtxHdr,
       );

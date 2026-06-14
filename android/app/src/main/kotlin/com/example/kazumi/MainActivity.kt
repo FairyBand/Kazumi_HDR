@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.BroadcastReceiver
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.app.RemoteAction
 import android.os.Build
@@ -11,18 +12,22 @@ import android.os.Bundle
 import android.os.StatFs
 import android.net.Uri
 import android.app.PictureInPictureParams
+import android.view.Display
 import android.graphics.drawable.Icon
+import android.util.Log
 import android.util.Rational
 import androidx.annotation.NonNull
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import io.flutter.embedding.android.RenderMode
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.ryanheise.audioservice.AudioServiceActivity
 
 class MainActivity: AudioServiceActivity() {
+    private val TAG = "KazumiMainActivity"
     private val CHANNEL = "com.predidit.kazumi/intent"
     private val STORAGE_CHANNEL = "com.predidit.kazumi/storage"
     private val PIP_CHANNEL = "com.predidit.kazumi/pip"
@@ -41,6 +46,10 @@ class MainActivity: AudioServiceActivity() {
     private val actionPipPlayPause = "com.predidit.kazumi.pip.PLAY_PAUSE"
     private val actionPipForward = "com.predidit.kazumi.pip.FORWARD"
     private val actionPipToggleDanmaku = "com.predidit.kazumi.pip.TOGGLE_DANMAKU"
+
+    override fun getRenderMode(): RenderMode {
+        return RenderMode.texture
+    }
 
     private val pipActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
@@ -89,6 +98,13 @@ class MainActivity: AudioServiceActivity() {
             } else if (call.method == "getAndroidSdkVersion") {
                 val sdkVersion = getAndroidSdkVersion()
                 result.success(sdkVersion)
+            } else if (call.method == "getAndroidHdrPeakBrightness") {
+                result.success(getAndroidHdrPeakBrightness())
+            } else if (call.method == "getAndroidHdrDisplayCapabilities") {
+                result.success(getAndroidHdrDisplayCapabilities())
+            } else if (call.method == "setAndroidHdrMode") {
+                val enabled = call.argument<Boolean>("enabled") ?: false
+                result.success(setAndroidHdrMode(enabled))
             } else if (call.method == "enterFullscreen") {
                 enterAndroidFullscreen()
                 result.success(null)
@@ -157,6 +173,65 @@ class MainActivity: AudioServiceActivity() {
 
     private fun getAndroidSdkVersion(): Int {
         return Build.VERSION.SDK_INT
+    }
+
+    private fun getAndroidHdrPeakBrightness(): Double? {
+        return getAndroidHdrDisplayCapabilities()?.get("maxLuminance") as? Double
+    }
+
+    private fun getAndroidHdrDisplayCapabilities(): Map<String, Any>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return null
+        }
+        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay
+        } ?: return null
+        val hdrCapabilities = display.hdrCapabilities ?: return null
+        val supportedHdrTypes = hdrCapabilities.supportedHdrTypes
+        if (supportedHdrTypes.isEmpty()) {
+            return null
+        }
+        val desiredMaxLuminance = hdrCapabilities.desiredMaxLuminance
+        val desiredMaxAverageLuminance = hdrCapabilities.desiredMaxAverageLuminance
+        val desiredMinLuminance = hdrCapabilities.desiredMinLuminance
+        val result = mutableMapOf<String, Any>(
+            "supportedHdrTypes" to supportedHdrTypes.toList()
+        )
+        if (desiredMaxLuminance.isFinite() && desiredMaxLuminance > 0f) {
+            result["maxLuminance"] = desiredMaxLuminance.toDouble()
+        }
+        if (desiredMaxAverageLuminance.isFinite() && desiredMaxAverageLuminance > 0f) {
+            result["maxAverageLuminance"] = desiredMaxAverageLuminance.toDouble()
+        }
+        if (desiredMinLuminance.isFinite() && desiredMinLuminance >= 0f) {
+            result["minLuminance"] = desiredMinLuminance.toDouble()
+        }
+        return result
+    }
+
+    private fun setAndroidHdrMode(enabled: Boolean): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return false
+        }
+        return try {
+            window.colorMode = if (enabled) {
+                ActivityInfo.COLOR_MODE_HDR
+            } else {
+                ActivityInfo.COLOR_MODE_DEFAULT
+            }
+            Log.i(TAG, "Android HDR window mode requested: enabled=$enabled colorMode=${window.colorMode}")
+            window.colorMode == if (enabled) {
+                ActivityInfo.COLOR_MODE_HDR
+            } else {
+                ActivityInfo.COLOR_MODE_DEFAULT
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to set Android HDR window mode", e)
+            false
+        }
     }
 
     private fun enterAndroidFullscreen() {

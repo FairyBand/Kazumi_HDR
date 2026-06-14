@@ -38,6 +38,9 @@ String _superResolutionLabel(int type) {
 }
 
 List<int> _superResolutionOptions(bool supportsRtxHdr) {
+  if (Platform.isAndroid) {
+    return const [1, 2, 3, 4, 5, 6];
+  }
   if (!Platform.isWindows) {
     return const [1, 2, 3];
   }
