@@ -20,7 +20,7 @@ class ApiEndpoints {
 
   /// 在线升级
   static const String latestApp =
-      'https://api.github.com/repos/Predidit/Kazumi/releases/latest';
+      'https://api.github.com/repos/FairyBand/Kazumi_HDR/releases/latest';
 
   /// Github镜像
   static const String gitMirror = 'https://ghfast.top/';
@@ -29,8 +29,7 @@ class ApiEndpoints {
   static const String bangumiMirrorDomain = 'https://api.kazumi.fyi';
 
   /// Kazumi 镜像后端应用更新
-  static const String latestAppMirror =
-      '$bangumiMirrorDomain/kazumi/v1/app/latest';
+  static const String latestAppMirror = latestApp;
 
   /// 弹弹官网
   static const String dandanIndex = 'https://www.dandanplay.com/';
