@@ -44,6 +44,7 @@ abstract class _PlayerDebugController with Store {
   StreamSubscription<Playlist>? playerPlaylistSubscription;
   StreamSubscription<Track>? playerTracksSubscription;
   StreamSubscription<double?>? playerAudioBitrateSubscription;
+  StreamSubscription<double?>? playerVideoBitrateSubscription;
 
   Future<void> setup(
     Player player, {
@@ -94,7 +95,11 @@ abstract class _PlayerDebugController with Store {
     playerAudioBitrateSubscription = player.stream.audioBitrate.listen((event) {
       playerAudioBitrate = event.toString();
     });
-    playerVideoBitrate = '';
+    await playerVideoBitrateSubscription?.cancel();
+    if (!isCurrentPlayer(player)) return;
+    playerVideoBitrateSubscription = player.stream.videoBitrate.listen((event) {
+      playerVideoBitrate = event.toString();
+    });
   }
 
   Future<void> cancel() async {
@@ -107,6 +112,7 @@ abstract class _PlayerDebugController with Store {
     final playlistSubscription = playerPlaylistSubscription;
     final tracksSubscription = playerTracksSubscription;
     final audioBitrateSubscription = playerAudioBitrateSubscription;
+    final videoBitrateSubscription = playerVideoBitrateSubscription;
 
     playerLogSubscription = null;
     playerWidthSubscription = null;
@@ -116,6 +122,7 @@ abstract class _PlayerDebugController with Store {
     playerPlaylistSubscription = null;
     playerTracksSubscription = null;
     playerAudioBitrateSubscription = null;
+    playerVideoBitrateSubscription = null;
 
     await logSubscription?.cancel();
     await widthSubscription?.cancel();
@@ -125,5 +132,6 @@ abstract class _PlayerDebugController with Store {
     await playlistSubscription?.cancel();
     await tracksSubscription?.cancel();
     await audioBitrateSubscription?.cancel();
+    await videoBitrateSubscription?.cancel();
   }
 }
