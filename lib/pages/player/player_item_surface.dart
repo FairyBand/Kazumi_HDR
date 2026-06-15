@@ -9,6 +9,7 @@ import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
+import 'package:kazumi/services/platform/windows_title_bar_service.dart';
 import 'package:window_manager/window_manager.dart';
 
 class PlayerItemSurface extends StatefulWidget {
@@ -31,6 +32,7 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
 
   Rect? _lastNativeHdrRect;
   bool? _lastNativeHdrTransparency;
+  Brightness? _lastTitleBarBrightness;
 
   bool get _usesWindowsNativeHdr =>
       Platform.isWindows &&
@@ -55,18 +57,29 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
     if (_lastNativeHdrTransparency == enabled) {
       return;
     }
+    final previous = _lastNativeHdrTransparency;
     _lastNativeHdrTransparency = enabled;
     if (!Platform.isWindows) {
       return;
     }
+    final titleBarBrightness = Theme.of(context).brightness;
+    _lastTitleBarBrightness = titleBarBrightness;
     try {
-      await windowManager.setBackgroundColor(
-        enabled ? Colors.transparent : Colors.black,
-      );
-      await _mediaKitVideoChannel.invokeMethod(
-        'VideoOutputManager.SetFlutterOverlayTransparency',
-        {'enabled': enabled},
-      );
+      if (enabled || previous == true) {
+        if (enabled) {
+          await windowManager.setBackgroundColor(Colors.transparent);
+          await WindowsTitleBarService.setBrightness(
+            titleBarBrightness,
+          );
+        }
+        await _mediaKitVideoChannel.invokeMethod(
+          'VideoOutputManager.SetFlutterOverlayTransparency',
+          {'enabled': enabled},
+        );
+        await WindowsTitleBarService.setBrightness(
+          titleBarBrightness,
+        );
+      }
     } catch (_) {}
   }
 
@@ -111,16 +124,25 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
   @override
   void dispose() {
     if (Platform.isWindows) {
+      final wasUsingNativeHdr = _lastNativeHdrTransparency == true;
+      final titleBarBrightness = _lastTitleBarBrightness;
       _lastNativeHdrTransparency = false;
-      unawaited(
-        Future.wait([
-          windowManager.setBackgroundColor(Colors.black),
-          _mediaKitVideoChannel.invokeMethod<void>(
-            'VideoOutputManager.SetFlutterOverlayTransparency',
-            {'enabled': false},
-          ),
-        ]).catchError((_) => <void>[]),
-      );
+      if (wasUsingNativeHdr) {
+        unawaited(
+          () async {
+            await _mediaKitVideoChannel.invokeMethod<void>(
+              'VideoOutputManager.SetFlutterOverlayTransparency',
+              {'enabled': false},
+            );
+            if (titleBarBrightness != null) {
+              await WindowsTitleBarService.setBrightness(
+                titleBarBrightness,
+              );
+            }
+          }()
+              .catchError((_) {}),
+        );
+      }
     }
     super.dispose();
   }

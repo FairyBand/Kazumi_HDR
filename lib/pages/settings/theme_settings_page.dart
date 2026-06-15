@@ -9,9 +9,9 @@ import 'package:kazumi/bean/settings/theme_provider.dart';
 import 'package:kazumi/pages/popular/popular_controller.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
 import 'package:kazumi/bean/settings/color_type.dart';
+import 'package:kazumi/services/platform/windows_title_bar_service.dart';
 import 'package:card_settings_ui/card_settings_ui.dart';
 import 'package:provider/provider.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/theme.dart';
 
@@ -120,7 +120,7 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
 
     // Update Windows title bar theme
     if (Platform.isWindows) {
-      await windowManager.setBrightness(
+      await WindowsTitleBarService.setBrightness(
           themeProvider.isEffectiveDark() ? Brightness.dark : Brightness.light);
     }
   }
