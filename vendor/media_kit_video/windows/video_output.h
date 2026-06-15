@@ -13,7 +13,6 @@
 
 #include <client.h>
 #include <render.h>
-#include <render_dxgi.h>
 
 #include <future>
 #include <functional>

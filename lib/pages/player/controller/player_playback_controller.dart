@@ -306,6 +306,10 @@ abstract class _PlayerPlaybackController with Store {
       hardwareDecoder = 'd3d11va';
       try {
         await pp.setProperty("gpu-api", "d3d11");
+        if (_isMpvHdrType(superResolutionType)) {
+          await pp.setProperty("d3d11-output-format", "rgb10_a2");
+          await pp.setProperty("d3d11-output-csp", "pq");
+        }
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(player);
         }
@@ -599,8 +603,16 @@ abstract class _PlayerPlaybackController with Store {
         "target-prim",
         Platform.isAndroid ? "display-p3" : "bt.2020",
       );
+      await pp.setProperty(
+        "target-gamut",
+        Platform.isWindows ? "display-p3" : "auto",
+      );
       await pp.setProperty("target-colorspace-hint", "yes");
       await pp.setProperty("target-colorspace-hint-strict", "no");
+      if (Platform.isWindows) {
+        await pp.setProperty("d3d11-output-format", "rgb10_a2");
+        await pp.setProperty("d3d11-output-csp", "pq");
+      }
       await pp.setProperty("target-peak", await _mpvHdrTargetPeak());
       await pp.setProperty("hdr-reference-white", "203");
       await pp.setProperty("hdr-compute-peak", "no");
@@ -633,6 +645,7 @@ abstract class _PlayerPlaybackController with Store {
     await pp.setProperty("hdr-contrast-smoothness", "3.5");
     await pp.setProperty("target-prim", "auto");
     await pp.setProperty("target-trc", "auto");
+    await pp.setProperty("target-gamut", "auto");
     await pp.setProperty("target-colorspace-hint", "auto");
     await pp.setProperty("target-colorspace-hint-strict", "yes");
     if (Platform.isWindows) {

@@ -15,6 +15,10 @@ set(PLUGIN_NAME "media_kit_video_plugin")
 # This is shipped as part of package:media_kit_libs_*** package(s).
 # Must be built before this target.
 set(LIBMPV_SRC "${CMAKE_BINARY_DIR}/libmpv")
+set(LIBMPV_VERSIONED_SRC "${CMAKE_BINARY_DIR}/libmpv-20260521-db73857997")
+if(EXISTS "${LIBMPV_VERSIONED_SRC}")
+  set(LIBMPV_SRC "${LIBMPV_VERSIONED_SRC}")
+endif()
 
 # Deal with MSVC incompatiblity
 add_compile_definitions(_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)

@@ -22,7 +22,7 @@ dependencies:
   media_kit:
     git:
       url: https://github.com/Predidit/media-kit.git
-      ref: 13b332ad3fd4cd5d84c64670eceda48a6d54504e
+      ref: a7d4a070fb4b66cf794893a88a1686156daf20be
       path: ./media_kit
 
   synchronized: ^3.1.0

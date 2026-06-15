@@ -61,6 +61,7 @@ VideoOutput::VideoOutput(int64_t handle,
     // Initialize video playback with hardware acceleration using native D3D11.
     auto is_hardware_acceleration_enabled = false;
     
+#ifdef MPV_RENDER_API_TYPE_DXGI
     if (configuration.enable_hardware_acceleration) {
       try {
         IDXGIAdapter* flutter_adapter = nullptr;
@@ -121,6 +122,7 @@ VideoOutput::VideoOutput(int64_t handle,
         d3d11_renderer_.reset(nullptr);
       }
     }
+#endif
     
     if (!is_hardware_acceleration_enabled) {
       std::cout << "media_kit: VideoOutput: Using S/W rendering." << std::endl;
