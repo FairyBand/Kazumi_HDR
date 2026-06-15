@@ -52,6 +52,22 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
     return isChineseLocale(context) ? zh : en;
   }
 
+  String superResolutionLabel(BuildContext context, int type) {
+    final isZh = isChineseLocale(context);
+    return switch (type) {
+      1 => isZh ? '\u5173\u95ed' : 'OFF',
+      2 => isZh ? '\u6548\u7387\u6863' : 'Efficiency',
+      3 => isZh ? '\u8d28\u91cf\u6863' : 'Quality',
+      4 => 'MPV HDR',
+      5 => isZh ? 'MPV HDR + \u6548\u7387\u6863' : 'MPV HDR + Efficiency',
+      6 => isZh ? 'MPV HDR + \u8d28\u91cf\u6863' : 'MPV HDR + Quality',
+      7 => 'RTX HDR',
+      8 => isZh ? 'RTX HDR + \u6548\u7387\u6863' : 'RTX HDR + Efficiency',
+      9 => isZh ? 'RTX HDR + \u8d28\u91cf\u6863' : 'RTX HDR + Quality',
+      _ => isZh ? '\u672a\u77e5\u9009\u9879' : 'Unknown',
+    };
+  }
+
   bool _isMpvHdrType(int type) {
     return type >= 4 && type <= 6;
   }
@@ -254,33 +270,33 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
             tiles: [
               superResolutionTile(
                 context: context,
-                title: 'OFF',
+                title: superResolutionLabel(context, 1),
                 description: textFor(
                   context,
-                  '默认禁用超分辨率',
-                  'Disable super resolution by default',
+                  '\u9ed8\u8ba4\u4f7f\u7528\u5173\u95ed',
+                  'Use OFF by default',
                 ),
                 value: '1',
                 fontFamily: fontFamily,
               ),
               superResolutionTile(
                 context: context,
-                title: 'Efficiency',
+                title: superResolutionLabel(context, 2),
                 description: textFor(
                   context,
-                  '默认启用基于 Anime4K 的超分辨率（效率优先）',
-                  'Enable Anime4K super resolution by default, prioritizing efficiency',
+                  '\u9ed8\u8ba4\u4f7f\u7528\u6548\u7387\u6863',
+                  'Use Efficiency by default',
                 ),
                 value: '2',
                 fontFamily: fontFamily,
               ),
               superResolutionTile(
                 context: context,
-                title: 'Quality',
+                title: superResolutionLabel(context, 3),
                 description: textFor(
                   context,
-                  '默认启用基于 Anime4K 的超分辨率（质量优先）',
-                  'Enable Anime4K super resolution by default, prioritizing quality',
+                  '\u9ed8\u8ba4\u4f7f\u7528\u8d28\u91cf\u6863',
+                  'Use Quality by default',
                 ),
                 value: '3',
                 fontFamily: fontFamily,
@@ -288,33 +304,33 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
               if (supportsMpvHdr) ...[
                 superResolutionTile(
                   context: context,
-                  title: 'MPV SDR->HDR',
+                  title: superResolutionLabel(context, 4),
                   description: textFor(
                     context,
-                    '使用 mpv 逆色调映射输出 HDR',
-                    'Use mpv inverse tone mapping to output HDR',
+                    '\u9ed8\u8ba4\u4f7f\u7528 MPV HDR',
+                    'Use MPV HDR by default',
                   ),
                   value: '4',
                   fontFamily: fontFamily,
                 ),
                 superResolutionTile(
                   context: context,
-                  title: 'Anime4K Efficiency + HDR',
+                  title: superResolutionLabel(context, 5),
                   description: textFor(
                     context,
-                    'Anime4K 效率档 + MPV SDR->HDR',
-                    'Anime4K efficiency mode + MPV SDR->HDR',
+                    '\u9ed8\u8ba4\u4f7f\u7528 MPV HDR + \u6548\u7387\u6863',
+                    'Use MPV HDR + Efficiency by default',
                   ),
                   value: '5',
                   fontFamily: fontFamily,
                 ),
                 superResolutionTile(
                   context: context,
-                  title: 'Anime4K Quality + HDR',
+                  title: superResolutionLabel(context, 6),
                   description: textFor(
                     context,
-                    'Anime4K 质量档 + MPV SDR->HDR',
-                    'Anime4K quality mode + MPV SDR->HDR',
+                    '\u9ed8\u8ba4\u4f7f\u7528 MPV HDR + \u8d28\u91cf\u6863',
+                    'Use MPV HDR + Quality by default',
                   ),
                   value: '6',
                   fontFamily: fontFamily,
@@ -322,33 +338,33 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
                 if (supportsRtxHdrOptions) ...[
                   superResolutionTile(
                     context: context,
-                    title: 'RTX HDR',
+                    title: superResolutionLabel(context, 7),
                     description: textFor(
                       context,
-                      '使用 NVIDIA RTX HDR 进行 SDR 到 HDR 增强',
-                      'Use NVIDIA RTX HDR for SDR to HDR enhancement',
+                      '\u9ed8\u8ba4\u4f7f\u7528 RTX HDR',
+                      'Use RTX HDR by default',
                     ),
                     value: '7',
                     fontFamily: fontFamily,
                   ),
                   superResolutionTile(
                     context: context,
-                    title: 'Anime4K Efficiency + RTX HDR',
+                    title: superResolutionLabel(context, 8),
                     description: textFor(
                       context,
-                      'Anime4K 效率档 + NVIDIA RTX HDR',
-                      'Anime4K efficiency mode + NVIDIA RTX HDR',
+                      '\u9ed8\u8ba4\u4f7f\u7528 RTX HDR + \u6548\u7387\u6863',
+                      'Use RTX HDR + Efficiency by default',
                     ),
                     value: '8',
                     fontFamily: fontFamily,
                   ),
                   superResolutionTile(
                     context: context,
-                    title: 'Anime4K Quality + RTX HDR',
+                    title: superResolutionLabel(context, 9),
                     description: textFor(
                       context,
-                      'Anime4K 质量档 + NVIDIA RTX HDR',
-                      'Anime4K quality mode + NVIDIA RTX HDR',
+                      '\u9ed8\u8ba4\u4f7f\u7528 RTX HDR + \u8d28\u91cf\u6863',
+                      'Use RTX HDR + Quality by default',
                     ),
                     value: '9',
                     fontFamily: fontFamily,

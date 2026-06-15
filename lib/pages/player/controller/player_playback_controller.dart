@@ -60,12 +60,12 @@ abstract class _PlayerPlaybackController with Store {
   /// 1. OFF
   /// 2. Anime4K Efficiency
   /// 3. Anime4K Quality
-  /// 4. MPV SDR to HDR
-  /// 5. Anime4K Efficiency + MPV SDR to HDR
-  /// 6. Anime4K Quality + MPV SDR to HDR
+  /// 4. MPV HDR
+  /// 5. MPV HDR + Efficiency
+  /// 6. MPV HDR + Quality
   /// 7. RTX HDR
-  /// 8. Anime4K Efficiency + RTX HDR
-  /// 9. Anime4K Quality + RTX HDR
+  /// 8. RTX HDR + Efficiency
+  /// 9. RTX HDR + Quality
   @observable
   int superResolutionType = 1;
 

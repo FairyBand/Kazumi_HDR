@@ -106,18 +106,31 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         1,
         2,
         3,
-        if (Platform.isAndroid) 4,
-        if (Platform.isWindows && supportsRtxHdr) 5,
+        if (Platform.isWindows || Platform.isAndroid) ...[
+          4,
+          5,
+          6,
+        ],
+        if (Platform.isWindows && supportsRtxHdr) ...[
+          7,
+          8,
+          9,
+        ],
       ];
 
-  String _superResolutionLabel(int type) {
+  String _superResolutionLabel(BuildContext context, int type) {
+    final isZh = Localizations.localeOf(context).languageCode == 'zh';
     return switch (type) {
-      1 => '关闭',
-      2 => '效率档',
-      3 => '质量档',
-      4 => 'HDR 原生输出',
-      5 => 'RTX HDR 原生输出',
-      _ => '未知选项',
+      1 => isZh ? '\u5173\u95ed' : 'OFF',
+      2 => isZh ? '\u6548\u7387\u6863' : 'Efficiency',
+      3 => isZh ? '\u8d28\u91cf\u6863' : 'Quality',
+      4 => 'MPV HDR',
+      5 => isZh ? 'MPV HDR + \u6548\u7387\u6863' : 'MPV HDR + Efficiency',
+      6 => isZh ? 'MPV HDR + \u8d28\u91cf\u6863' : 'MPV HDR + Quality',
+      7 => 'RTX HDR',
+      8 => isZh ? 'RTX HDR + \u6548\u7387\u6863' : 'RTX HDR + Efficiency',
+      9 => isZh ? 'RTX HDR + \u8d28\u91cf\u6863' : 'RTX HDR + Quality',
+      _ => isZh ? '\u672a\u77e5\u9009\u9879' : 'Unknown',
     };
   }
 
@@ -856,7 +869,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                               child: Align(
                                 alignment: Alignment.centerLeft,
                                 child: Text(
-                                  _superResolutionLabel(type),
+                                  _superResolutionLabel(context, type),
                                   style: TextStyle(
                                     color: playerController
                                                 .playback.superResolutionType ==
