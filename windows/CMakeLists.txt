@@ -41,6 +41,11 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
   target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
   target_compile_options(${TARGET} PRIVATE /EHsc)
+  # Plugins compile many translation units in parallel. /FS serializes writes
+  # to the MSVC PDB and prevents intermittent C1041 build failures.
+  if(MSVC)
+    target_compile_options(${TARGET} PRIVATE /FS)
+  endif()
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
 endfunction()
