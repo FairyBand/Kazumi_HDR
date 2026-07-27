@@ -1,23 +1,32 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:kazumi/bean/card/rule_card.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/plugins/plugins.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
+import 'package:kazumi/pages/plugin_editor/plugin_update_actions.dart';
+import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/utils/encoding.dart';
 
 class PluginViewPage extends StatefulWidget {
-  const PluginViewPage({super.key});
+  const PluginViewPage({
+    super.key,
+    required this.controller,
+  });
+
+  final PluginsController controller;
 
   @override
   State<PluginViewPage> createState() => _PluginViewPageState();
 }
 
 class _PluginViewPageState extends State<PluginViewPage> {
-  final PluginsController pluginsController = Modular.get<PluginsController>();
+  PluginsController get pluginsController => widget.controller;
 
   // 是否处于多选模式
   bool isMultiSelectMode = false;
@@ -26,20 +35,26 @@ class _PluginViewPageState extends State<PluginViewPage> {
   final Set<String> selectedNames = {};
 
   Future<void> _handleUpdate() async {
-    KazumiDialog.showLoading(msg: '更新中');
-    int count = await pluginsController.tryUpdateAllPlugin();
-    KazumiDialog.dismiss();
-    if (count == 0) {
-      KazumiDialog.showToast(message: '所有规则已是最新');
-    } else {
-      KazumiDialog.showToast(message: '更新成功 $count 条');
+    await updateAllPluginsWithFeedback(
+      pluginsController,
+      ensureCatalog: true,
+    );
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _handleReorder(int oldIndex, int newIndex) async {
+    try {
+      await pluginsController.onReorder(oldIndex, newIndex);
+    } catch (_) {
+      KazumiDialog.showToast(message: '保存规则顺序失败');
     }
   }
 
   void _handleAdd() {
     KazumiDialog.show(builder: (context) {
       return AlertDialog(
-        // contentPadding: EdgeInsets.zero, // 设置为零以减小内边距
         content: SingleChildScrollView(
           // 使用可滚动的SingleChildScrollView包装Column
           child: Column(
@@ -49,7 +64,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
                 title: const Text('新建规则'),
                 onTap: () {
                   KazumiDialog.dismiss();
-                  Modular.to.pushNamed('/settings/plugin/editor',
+                  context.pushNamed('/settings/plugin/editor',
                       arguments: Plugin.fromTemplate());
                 },
               ),
@@ -58,7 +73,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
                 title: const Text('从规则仓库导入'),
                 onTap: () {
                   KazumiDialog.dismiss();
-                  Modular.to.pushNamed('/settings/plugin/shop',
+                  context.pushNamed('/settings/plugin/shop',
                       arguments: Plugin.fromTemplate());
                 },
               ),
@@ -102,14 +117,28 @@ class _PluginViewPageState extends State<PluginViewPage> {
               return TextButton(
                 onPressed: () async {
                   try {
-                    pluginsController.updatePlugin(Plugin.fromJson(
-                        json.decode(kazumiBase64ToJson(pluginText))));
+                    final plugin = Plugin.fromJson(
+                      json.decode(kazumiBase64ToJson(pluginText)),
+                    );
+                    if (plugin.requiresNewerClient) {
+                      KazumiDialog.dismiss();
+                      KazumiDialog.showToast(
+                        message: '规则需要更高版本客户端',
+                      );
+                      return;
+                    }
+                    await pluginsController.updatePlugin(plugin);
+                    KazumiDialog.dismiss();
                     KazumiDialog.showToast(message: '导入成功');
-                  } catch (e) {
+                  } catch (e, stackTrace) {
+                    KazumiLogger().e(
+                      'Plugin: failed to import rule link',
+                      error: e,
+                      stackTrace: stackTrace,
+                    );
                     KazumiDialog.dismiss();
                     KazumiDialog.showToast(message: '导入失败 ${e.toString()}');
                   }
-                  KazumiDialog.dismiss();
                 },
                 child: const Text('导入'),
               );
@@ -130,14 +159,28 @@ class _PluginViewPageState extends State<PluginViewPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(_loadPluginUpdateStatus());
+  }
+
+  Future<void> _loadPluginUpdateStatus() async {
+    try {
+      await pluginsController.ensurePluginCatalog();
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (_) {
+      KazumiDialog.showToast(message: '检查规则更新失败');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {});
     return PopScope(
       canPop: !isMultiSelectMode,
       onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (didPop) {
+          return;
+        }
         if (isMultiSelectMode) {
           setState(() {
             isMultiSelectMode = false;
@@ -186,9 +229,15 @@ class _PluginViewPageState extends State<PluginViewPage> {
                                 ),
                               ),
                               TextButton(
-                                onPressed: () {
-                                  pluginsController
-                                      .removePlugins(selectedNames);
+                                onPressed: () async {
+                                  try {
+                                    await pluginsController
+                                        .removePlugins(selectedNames);
+                                  } catch (_) {
+                                    KazumiDialog.showToast(message: '删除规则失败');
+                                    return;
+                                  }
+                                  if (!mounted) return;
                                   setState(() {
                                     isMultiSelectMode = false;
                                     selectedNames.clear();
@@ -227,8 +276,10 @@ class _PluginViewPageState extends State<PluginViewPage> {
                   child: Text('啊咧（⊙.⊙） 没有可用规则的说'),
                 )
               : Builder(builder: (context) {
+                  final colorScheme = Theme.of(context).colorScheme;
                   return ReorderableListView.builder(
                       buildDefaultDragHandles: false,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                       proxyDecorator: (child, index, animation) {
                         return Material(
                           elevation: 0,
@@ -237,114 +288,62 @@ class _PluginViewPageState extends State<PluginViewPage> {
                         );
                       },
                       onReorderItem: (int oldIndex, int newIndex) {
-                        pluginsController.onReorder(oldIndex, newIndex);
+                        unawaited(_handleReorder(oldIndex, newIndex));
                       },
                       itemCount: pluginsController.pluginList.length,
                       itemBuilder: (context, index) {
                         var plugin = pluginsController.pluginList[index];
                         bool canUpdate =
                             pluginsController.pluginUpdateStatus(plugin) ==
-                                'updatable';
-                        return Card(
-                            key: ValueKey(index),
-                            margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                            child: ListTile(
-                              trailing: pluginCardTrailing(index),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
-                              onLongPress: () {
-                                if (!isMultiSelectMode) {
-                                  setState(() {
-                                    isMultiSelectMode = true;
-                                    selectedNames.add(plugin.name);
-                                  });
+                                PluginUpdateAvailability.updatable;
+                        return RuleCard(
+                          key: ObjectKey(plugin),
+                          title: plugin.name,
+                          selected: selectedNames.contains(plugin.name),
+                          trailing: pluginCardTrailing(index),
+                          onLongPress: () {
+                            if (!isMultiSelectMode) {
+                              setState(() {
+                                isMultiSelectMode = true;
+                                selectedNames.add(plugin.name);
+                              });
+                            }
+                          },
+                          onTap: () {
+                            if (isMultiSelectMode) {
+                              setState(() {
+                                if (selectedNames.contains(plugin.name)) {
+                                  selectedNames.remove(plugin.name);
+                                  if (selectedNames.isEmpty) {
+                                    isMultiSelectMode = false;
+                                  }
+                                } else {
+                                  selectedNames.add(plugin.name);
                                 }
-                              },
-                              onTap: () {
-                                if (isMultiSelectMode) {
-                                  setState(() {
-                                    if (selectedNames.contains(plugin.name)) {
-                                      selectedNames.remove(plugin.name);
-                                      if (selectedNames.isEmpty) {
-                                        isMultiSelectMode = false;
-                                      }
-                                    } else {
-                                      selectedNames.add(plugin.name);
-                                    }
-                                  });
-                                }
-                              },
-                              selected: selectedNames.contains(plugin.name),
-                              selectedTileColor: Theme.of(context)
-                                  .colorScheme
-                                  .primaryContainer,
-                              title: Text(
-                                plugin.name,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
+                              });
+                            }
+                          },
+                          tags: [
+                            RuleTag(
+                              label: plugin.version,
+                              background: colorScheme.secondaryContainer,
+                              foreground: colorScheme.onSecondaryContainer,
+                            ),
+                            if (canUpdate)
+                              RuleTag(
+                                label: '可更新',
+                                background: colorScheme.errorContainer,
+                                foreground: colorScheme.onErrorContainer,
                               ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Text(
-                                        'Version: ${plugin.version}',
-                                        style:
-                                            const TextStyle(color: Colors.grey),
-                                      ),
-                                      if (canUpdate) ...[
-                                        const SizedBox(width: 8),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .errorContainer,
-                                            borderRadius:
-                                                BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            '可更新',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onErrorContainer,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                      if (pluginsController.validityTracker
-                                          .isSearchValid(plugin.name)) ...[
-                                        const SizedBox(width: 8),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .tertiaryContainer,
-                                            borderRadius:
-                                                BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            '搜索有效',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onTertiaryContainer,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ],
+                            if (pluginsController.validityTracker
+                                .isSearchValid(plugin.name))
+                              RuleTag(
+                                label: '搜索有效',
+                                background: colorScheme.tertiaryContainer,
+                                foreground: colorScheme.onTertiaryContainer,
                               ),
-                            ));
+                          ],
+                        );
                       });
                 });
         }),
@@ -400,22 +399,29 @@ class _PluginViewPageState extends State<PluginViewPage> {
         MenuItemButton(
           requestFocusOnHover: false,
           onPressed: () async {
-            var state = pluginsController.pluginUpdateStatus(plugin);
-            if (state == "nonexistent") {
-              KazumiDialog.showToast(message: '规则仓库中没有当前规则');
-            } else if (state == "latest") {
-              KazumiDialog.showToast(message: '规则已是最新');
-            } else if (state == "updatable") {
-              KazumiDialog.showLoading(msg: '更新中');
-              int res = await pluginsController.tryUpdatePlugin(plugin);
-              KazumiDialog.dismiss();
-              if (res == 0) {
-                KazumiDialog.showToast(message: '更新成功');
-              } else if (res == 1) {
-                KazumiDialog.showToast(message: 'kazumi版本过低, 此规则不兼容当前版本');
-              } else if (res == 2) {
-                KazumiDialog.showToast(message: '更新规则失败');
+            try {
+              await pluginsController.ensurePluginCatalog();
+              if (mounted) {
+                setState(() {});
               }
+            } catch (_) {
+              KazumiDialog.showToast(message: '检查规则更新失败');
+              return;
+            }
+            final state = pluginsController.pluginUpdateStatus(plugin);
+            switch (state) {
+              case PluginUpdateAvailability.unknown:
+                KazumiDialog.showToast(message: '尚未获取规则更新状态');
+              case PluginUpdateAvailability.notInCatalog:
+                KazumiDialog.showToast(message: '规则仓库中没有当前规则');
+              case PluginUpdateAvailability.latest:
+                KazumiDialog.showToast(message: '规则已是最新');
+              case PluginUpdateAvailability.updatable:
+                await updatePluginWithFeedback(
+                  pluginsController,
+                  plugin.name,
+                  installing: false,
+                );
             }
           },
           child: Container(
@@ -436,7 +442,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
         MenuItemButton(
           requestFocusOnHover: false,
           onPressed: () {
-            Modular.to.pushNamed('/settings/plugin/editor', arguments: plugin);
+            context.pushNamed('/settings/plugin/editor', arguments: plugin);
           },
           child: Container(
             height: 48,
@@ -456,7 +462,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
         MenuItemButton(
           requestFocusOnHover: false,
           onPressed: () {
-            Modular.to.pushNamed('/settings/plugin/test', arguments: plugin);
+            context.pushNamed('/settings/plugin/test', arguments: plugin);
           },
           child: Container(
             height: 48,
@@ -529,9 +535,11 @@ class _PluginViewPageState extends State<PluginViewPage> {
         MenuItemButton(
           requestFocusOnHover: false,
           onPressed: () async {
-            setState(() {
-              pluginsController.removePlugin(plugin);
-            });
+            try {
+              await pluginsController.removePlugin(plugin);
+            } catch (_) {
+              KazumiDialog.showToast(message: '删除规则失败');
+            }
           },
           child: Container(
             height: 48,

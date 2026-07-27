@@ -10,8 +10,7 @@ import 'package:kazumi/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/settings/theme_provider.dart';
-import 'package:kazumi/services/platform/windows_title_bar_service.dart';
-import 'package:provider/provider.dart';
+import 'package:kazumi/navigation.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/utils/theme.dart';
@@ -36,7 +35,6 @@ class _AppWidgetState extends State<AppWidget>
     trayManager.addListener(this);
     windowManager.addListener(this);
     WidgetsBinding.instance.addObserver(this);
-    Modular.setObservers([KazumiDialog.observer]);
     _initializePlatformIntegrations();
   }
 
@@ -82,7 +80,7 @@ class _AppWidgetState extends State<AppWidget>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final themeProvider = Provider.of<ThemeProvider>(context);
+    final themeProvider = context.watch<ThemeProvider>();
     _applyStoredThemeSettings(themeProvider);
     _syncWindowsTitleBarBrightness(themeProvider);
   }
@@ -135,6 +133,30 @@ class _AppWidgetState extends State<AppWidget>
     return Color(int.parse(defaultThemeColor, radix: 16));
   }
 
+  /// dynamic_color builds its ColorScheme from the legacy CorePalette path,
+  /// which leaves the surfaceContainer* roles unset. ColorScheme then falls
+  /// back to `surface` for all of them, so cards and other containers become
+  /// indistinguishable from the page background. Rebuild the surface family
+  /// from the dynamic primary when that happens.
+  ColorScheme _completeDynamicScheme(
+      ColorScheme scheme, Brightness brightness) {
+    if (scheme.surfaceContainerLow != scheme.surface) return scheme;
+    final seeded = ColorScheme.fromSeed(
+      seedColor: scheme.primary,
+      brightness: brightness,
+    );
+    return scheme.copyWith(
+      surface: seeded.surface,
+      surfaceDim: seeded.surfaceDim,
+      surfaceBright: seeded.surfaceBright,
+      surfaceContainerLowest: seeded.surfaceContainerLowest,
+      surfaceContainerLow: seeded.surfaceContainerLow,
+      surfaceContainer: seeded.surfaceContainer,
+      surfaceContainerHigh: seeded.surfaceContainerHigh,
+      surfaceContainerHighest: seeded.surfaceContainerHighest,
+    );
+  }
+
   ThemeData _buildAppTheme({
     required Brightness brightness,
     required String? fontFamily,
@@ -146,7 +168,9 @@ class _AppWidgetState extends State<AppWidget>
       fontFamily: fontFamily,
       brightness: brightness,
       colorSchemeSeed: color,
-      colorScheme: colorScheme,
+      colorScheme: colorScheme == null
+          ? null
+          : _completeDynamicScheme(colorScheme, brightness),
       progressIndicatorTheme: progressIndicatorTheme2024,
       sliderTheme: sliderTheme2024,
       pageTransitionsTheme: pageTransitionsTheme2024,
@@ -161,7 +185,7 @@ class _AppWidgetState extends State<AppWidget>
     if (_lastTitleBarBrightness == brightness) return;
 
     _lastTitleBarBrightness = brightness;
-    WindowsTitleBarService.setBrightness(brightness).catchError((e) {
+    windowManager.setBrightness(brightness).catchError((e) {
       KazumiLogger().w('Window: set title bar brightness failed', error: e);
     });
   }
@@ -278,8 +302,7 @@ class _AppWidgetState extends State<AppWidget>
   @override
   Future<void> didChangePlatformBrightness() async {
     super.didChangePlatformBrightness();
-    final ThemeProvider themeProvider =
-        Provider.of<ThemeProvider>(context, listen: false);
+    final ThemeProvider themeProvider = context.read<ThemeProvider>();
     KazumiLogger().i(
         "Platform brightness changed, themeMode: ${themeProvider.themeMode}");
 
@@ -310,7 +333,7 @@ class _AppWidgetState extends State<AppWidget>
 
   @override
   Widget build(BuildContext context) {
-    final ThemeProvider themeProvider = Provider.of<ThemeProvider>(context);
+    final ThemeProvider themeProvider = context.watch<ThemeProvider>();
     bool oledEnhance = GStorage.getSetting(SettingsKeys.oledEnhance);
 
     var app = DynamicColorBuilder(
@@ -347,7 +370,8 @@ class _AppWidgetState extends State<AppWidget>
           theme: lightTheme,
           darkTheme: effectiveDarkTheme,
           themeMode: themeProvider.themeMode,
-          routerConfig: Modular.routerConfig,
+          scaffoldMessengerKey: rootScaffoldMessengerKey,
+          routerConfig: ModularApp.routerConfigOf(context),
         );
       },
     );

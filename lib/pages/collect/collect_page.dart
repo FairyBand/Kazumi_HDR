@@ -4,19 +4,22 @@ import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/modules/collect/collect_module.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/pages/menu/menu.dart';
 import 'package:kazumi/bean/card/bangumi_card.dart';
 import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:provider/provider.dart';
 import 'package:kazumi/bean/widget/collect_button.dart';
+import 'package:kazumi/bean/widget/empty_state_widget.dart';
 import 'package:kazumi/modules/collect/collect_sync_plan.dart';
 import 'package:kazumi/services/storage/storage.dart';
 
 class CollectPage extends StatefulWidget {
-  const CollectPage({super.key});
+  const CollectPage({
+    super.key,
+    required this.controller,
+  });
+
+  final CollectController controller;
 
   @override
   State<CollectPage> createState() => _CollectPageState();
@@ -24,8 +27,7 @@ class CollectPage extends StatefulWidget {
 
 class _CollectPageState extends State<CollectPage>
     with SingleTickerProviderStateMixin {
-  final CollectController collectController = Modular.get<CollectController>();
-  late NavigationBarState navigationBarState;
+  CollectController get collectController => widget.controller;
   TabController? tabController;
   bool showDelete = false;
   bool syncCollectiblesing = false;
@@ -132,25 +134,11 @@ class _CollectPageState extends State<CollectPage>
     );
   }
 
-  void onBackPressed(BuildContext context) {
-    if (syncCollectiblesing) {
-      return;
-    }
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
-      return;
-    }
-    navigationBarState.updateSelectedIndex(0);
-    Modular.to.navigate('/tab/popular/');
-  }
-
   @override
   void initState() {
     super.initState();
     collectController.loadCollectibles();
     tabController = TabController(vsync: this, length: tabs.length);
-    navigationBarState =
-        Provider.of<NavigationBarState>(context, listen: false);
   }
 
   @override
@@ -169,87 +157,75 @@ class _CollectPageState extends State<CollectPage>
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (bool didPop, Object? result) {
-        if (didPop) {
-          return;
-        }
-        if (syncCollectiblesing) {
-          return;
-        }
-        onBackPressed(context);
-      },
-      child: Scaffold(
-        appBar: SysAppBar(
-          needTopOffset: false,
-          toolbarHeight: 104,
-          bottom: TabBar(
-            controller: tabController,
-            tabs: tabs,
-            indicatorColor: Theme.of(context).colorScheme.primary,
-          ),
-          title: const Text('追番'),
-          actions: [
-            IconButton(
-                onPressed: () {
-                  setState(() {
-                    showDelete = !showDelete;
-                  });
-                },
-                icon: showDelete
-                    ? const Icon(Icons.edit_outlined)
-                    : const Icon(Icons.edit))
-          ],
+    return Scaffold(
+      appBar: SysAppBar(
+        needTopOffset: false,
+        toolbarHeight: 104,
+        bottom: TabBar(
+          controller: tabController,
+          tabs: tabs,
+          indicatorColor: Theme.of(context).colorScheme.primary,
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: () async {
-            bool webDavenable =
-                await GStorage.getSetting(SettingsKeys.webDavEnable);
-            bool webDavCollectEnable =
-                GStorage.getSetting(SettingsKeys.webDavEnableCollect);
-            bool bgmSyncEnable =
-                GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
-            final syncPlan = CollectSyncPlan(
-              webDavEnabled: webDavenable,
-              webDavCollectiblesEnabled: webDavCollectEnable,
-              bangumiEnabled: bgmSyncEnable,
-            );
-            if (!syncPlan.canSync) {
-              KazumiDialog.showToast(message: '同步功能不可用，请至少开启一个同步功能');
-              return;
-            }
-            if (showDelete) {
-              KazumiDialog.showToast(message: '编辑模式无法执行同步');
-              return;
-            }
-            if (syncCollectiblesing) {
-              return;
-            }
-            setState(() {
-              syncCollectiblesing = true;
-            });
-            try {
-              await _runFullSync(
-                plan: syncPlan,
-              );
-            } finally {
-              if (mounted) {
+        title: const Text('追番'),
+        actions: [
+          IconButton(
+              onPressed: () {
                 setState(() {
-                  syncCollectiblesing = false;
+                  showDelete = !showDelete;
                 });
-              }
-            }
-          },
-          child: syncCollectiblesing
-              ? const SizedBox(
-                  width: 32, height: 32, child: CircularProgressIndicator())
-              : const Icon(Icons.sync_rounded),
-        ),
-        body: Observer(builder: (context) {
-          return renderBody;
-        }),
+              },
+              icon: showDelete
+                  ? const Icon(Icons.edit_outlined)
+                  : const Icon(Icons.edit))
+        ],
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          bool webDavenable =
+              await GStorage.getSetting(SettingsKeys.webDavEnable);
+          bool webDavCollectEnable =
+              GStorage.getSetting(SettingsKeys.webDavEnableCollect);
+          bool bgmSyncEnable =
+              GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
+          final syncPlan = CollectSyncPlan(
+            webDavEnabled: webDavenable,
+            webDavCollectiblesEnabled: webDavCollectEnable,
+            bangumiEnabled: bgmSyncEnable,
+          );
+          if (!syncPlan.canSync) {
+            KazumiDialog.showToast(message: '同步功能不可用，请至少开启一个同步功能');
+            return;
+          }
+          if (showDelete) {
+            KazumiDialog.showToast(message: '编辑模式无法执行同步');
+            return;
+          }
+          if (syncCollectiblesing) {
+            return;
+          }
+          setState(() {
+            syncCollectiblesing = true;
+          });
+          try {
+            await _runFullSync(
+              plan: syncPlan,
+            );
+          } finally {
+            if (mounted) {
+              setState(() {
+                syncCollectiblesing = false;
+              });
+            }
+          }
+        },
+        child: syncCollectiblesing
+            ? const SizedBox(
+                width: 32, height: 32, child: CircularProgressIndicator())
+            : const Icon(Icons.sync_rounded),
+      ),
+      body: Observer(builder: (context) {
+        return renderBody;
+      }),
     );
   }
 
@@ -261,12 +237,17 @@ class _CollectPageState extends State<CollectPage>
       );
     } else {
       return const Center(
-        child: Text('啊嘞, 没有追番的说 (´;ω;`)'),
+        child: GeneralEmptyState(
+          icon: Icons.favorite_border_rounded,
+          title: '暂无追番内容',
+        ),
       );
     }
   }
 
   List<Widget> contentGrid(List<CollectedBangumi> collectedBangumiList) {
+    final bool showAnimeCounter =
+        GStorage.getSetting(SettingsKeys.showAnimeCounter);
     List<Widget> gridViewList = [];
     List<List<CollectedBangumi>> collectedBangumiRenderItemList =
         List.generate(tabs.length, (_) => <CollectedBangumi>[]);
@@ -345,6 +326,25 @@ class _CollectPageState extends State<CollectPage>
                 ),
               ),
             ),
+            if (collectedBangumiRenderItem.isNotEmpty && showAnimeCounter)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12, bottom: 12),
+                      child: Text(
+                        '总计：${collectedBangumiRenderItem.length}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       );

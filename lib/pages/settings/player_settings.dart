@@ -4,6 +4,8 @@ import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/bean/appbar/sys_app_bar.dart';
+import 'package:kazumi/pages/player/controller/player_aspect_ratio.dart';
+import 'package:kazumi/services/network/metered_network_service.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/player/pip_utils.dart';
@@ -18,9 +20,13 @@ class PlayerSettingsPage extends StatefulWidget {
 }
 
 class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
+  static const double _minPlayerControllerLayerDisappearSeconds = 1;
+  static const double _maxPlayerControllerLayerDisappearSeconds = 10;
+  static const int _playerControllerLayerDisappearDivisions = 18;
+
   late double defaultPlaySpeed;
   late double defaultShortcutForwardPlaySpeed;
-  late int defaultAspectRatioType;
+  late PlayerAspectRatio defaultAspectRatioMode;
   late bool hAenable;
   late bool androidEnableOpenSLES;
   late bool androidAutoEnterPIP;
@@ -37,6 +43,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   late int playerButtonSkipTime;
   late int playerArrowKeySkipTime;
   late int playerLogLevel;
+  late int playerControllerLayerDisappearTime;
   final MenuController playerAspectRatioMenuController = MenuController();
   final MenuController playerLogLevelMenuController = MenuController();
 
@@ -44,6 +51,18 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   void initState() {
     super.initState();
     _loadSettingsFromStorage();
+    MeteredNetworkService.listenable.addListener(_onMeteredNetworkChanged);
+  }
+
+  @override
+  void dispose() {
+    MeteredNetworkService.listenable.removeListener(_onMeteredNetworkChanged);
+    super.dispose();
+  }
+
+  void _onMeteredNetworkChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   void _loadSettingsFromStorage() {
@@ -51,8 +70,9 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
         GStorage.getSetting<double>(SettingsKeys.defaultPlaySpeed);
     defaultShortcutForwardPlaySpeed = GStorage.getSetting<double>(
         SettingsKeys.defaultShortcutForwardPlaySpeed);
-    defaultAspectRatioType =
-        GStorage.getSetting<int>(SettingsKeys.defaultAspectRatioType);
+    defaultAspectRatioMode = PlayerAspectRatio.fromStorageValue(
+      GStorage.getSetting<int>(SettingsKeys.defaultAspectRatioType),
+    );
     hAenable = GStorage.getSetting<bool>(SettingsKeys.hAenable);
     androidEnableOpenSLES =
         GStorage.getSetting<bool>(SettingsKeys.androidEnableOpenSLES);
@@ -78,6 +98,9 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
         GStorage.getSetting<int>(SettingsKeys.buttonSkipTime);
     playerArrowKeySkipTime =
         GStorage.getSetting<int>(SettingsKeys.arrowKeySkipTime);
+
+    playerControllerLayerDisappearTime = GStorage.getSetting<int>(
+        SettingsKeys.playerControllerLayerDisappearTime);
   }
 
   Future<void> resetPlayerSettings() async {
@@ -138,10 +161,13 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
     });
   }
 
-  void updateDefaultAspectRatioType(int type) {
-    GStorage.putSetting<int>(SettingsKeys.defaultAspectRatioType, type);
+  void updateDefaultAspectRatioMode(PlayerAspectRatio mode) {
+    GStorage.putSetting<int>(
+      SettingsKeys.defaultAspectRatioType,
+      mode.storageValue,
+    );
     setState(() {
-      defaultAspectRatioType = type;
+      defaultAspectRatioMode = mode;
     });
   }
 
@@ -211,6 +237,32 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
     });
   }
 
+  double get playerControllerLayerDisappearSeconds =>
+      (playerControllerLayerDisappearTime / Duration.millisecondsPerSecond)
+          .clamp(_minPlayerControllerLayerDisappearSeconds,
+              _maxPlayerControllerLayerDisappearSeconds)
+          .toDouble();
+
+  String formatPlayerControllerLayerDisappearSeconds(double seconds) {
+    if (seconds == seconds.roundToDouble()) {
+      return '${seconds.toInt()} 秒';
+    }
+    return '${seconds.toStringAsFixed(1)} 秒';
+  }
+
+  void updatePlayerControllerLayerDisappearSeconds(double seconds) {
+    final int newDisappearTime =
+        (seconds * Duration.millisecondsPerSecond).round();
+    if (newDisappearTime == playerControllerLayerDisappearTime) {
+      return;
+    }
+    GStorage.putSetting<int>(
+        SettingsKeys.playerControllerLayerDisappearTime, newDisappearTime);
+    setState(() {
+      playerControllerLayerDisappearTime = newDisappearTime;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final fontFamily = Theme.of(context).textTheme.bodyMedium?.fontFamily;
@@ -238,7 +290,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                 ),
                 SettingsTile.navigation(
                   onPressed: (_) async {
-                    await Modular.to.pushNamed('/settings/player/decoder');
+                    await context.pushNamed('/settings/player/decoder');
                   },
                   title:
                       Text('硬件解码器', style: TextStyle(fontFamily: fontFamily)),
@@ -248,7 +300,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                 if (Platform.isAndroid) ...[
                   SettingsTile.navigation(
                     onPressed: (_) async {
-                      await Modular.to.pushNamed('/settings/player/renderer');
+                      await context.pushNamed('/settings/player/renderer');
                     },
                     title:
                         Text('视频渲染器', style: TextStyle(fontFamily: fontFamily)),
@@ -257,6 +309,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   ),
                 ],
                 SettingsTile.switchTile(
+                  enabled: !MeteredNetworkService.isMetered,
                   onToggle: (value) async {
                     lowMemoryMode = value ?? !lowMemoryMode;
                     await GStorage.putSetting<bool>(
@@ -265,9 +318,14 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   },
                   title:
                       Text('低内存模式', style: TextStyle(fontFamily: fontFamily)),
-                  description: Text('禁用高级缓存以减少内存占用',
+                  description: Text(
+                      MeteredNetworkService.isMetered
+                          ? '移动网络下已自动启用'
+                          : '禁用高级缓存以减少内存占用',
                       style: TextStyle(fontFamily: fontFamily)),
-                  initialValue: lowMemoryMode,
+                  // Effective state, not the stored one, which stays untouched.
+                  initialValue:
+                      lowMemoryMode || MeteredNetworkService.isMetered,
                 ),
                 if (Platform.isAndroid) ...[
                   SettingsTile.switchTile(
@@ -287,7 +345,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                 ],
                 SettingsTile.navigation(
                   onPressed: (_) async {
-                    Modular.to.pushNamed('/settings/player/super');
+                    context.pushNamed('/settings/player/super');
                   },
                   title: Text('超分辨率', style: TextStyle(fontFamily: fontFamily)),
                 ),
@@ -491,8 +549,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   ),
                 ),
                 SettingsTile(
-                  title:
-                      Text('默认方向键倍速', style: TextStyle(fontFamily: fontFamily)),
+                  title: Text('默认方向键/长按倍速',
+                      style: TextStyle(fontFamily: fontFamily)),
                   description: Slider(
                     value: defaultShortcutForwardPlaySpeed,
                     min: 1.25,
@@ -537,6 +595,20 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   value: Text('$playerButtonSkipTime 秒',
                       style: TextStyle(fontFamily: fontFamily)),
                 ),
+                SettingsTile(
+                  title: Text(
+                      '播放控制器消失时间：${formatPlayerControllerLayerDisappearSeconds(playerControllerLayerDisappearSeconds)}',
+                      style: TextStyle(fontFamily: fontFamily)),
+                  description: Slider(
+                    value: playerControllerLayerDisappearSeconds,
+                    min: _minPlayerControllerLayerDisappearSeconds,
+                    max: _maxPlayerControllerLayerDisappearSeconds,
+                    divisions: _playerControllerLayerDisappearDivisions,
+                    label: formatPlayerControllerLayerDisappearSeconds(
+                        playerControllerLayerDisappearSeconds),
+                    onChanged: updatePlayerControllerLayerDisappearSeconds,
+                  ),
+                ),
                 SettingsTile.navigation(
                   onPressed: (_) async {
                     if (playerAspectRatioMenuController.isOpen) {
@@ -552,25 +624,26 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                     controller: playerAspectRatioMenuController,
                     builder: (_, __, ___) {
                       return Text(
-                        aspectRatioTypeMap[defaultAspectRatioType] ?? '自动',
+                        defaultAspectRatioMode.label,
                         style: TextStyle(fontFamily: fontFamily),
                       );
                     },
                     menuChildren: [
-                      for (final entry in aspectRatioTypeMap.entries)
+                      for (final aspectRatioMode in PlayerAspectRatio.values)
                         MenuItemButton(
                           requestFocusOnHover: false,
                           onPressed: () =>
-                              updateDefaultAspectRatioType(entry.key),
+                              updateDefaultAspectRatioMode(aspectRatioMode),
                           child: Container(
                             height: 48,
                             constraints: BoxConstraints(minWidth: 112),
                             child: Align(
                               alignment: Alignment.centerLeft,
                               child: Text(
-                                entry.value,
+                                aspectRatioMode.label,
                                 style: TextStyle(
-                                  color: entry.key == defaultAspectRatioType
+                                  color: aspectRatioMode ==
+                                          defaultAspectRatioMode
                                       ? Theme.of(context).colorScheme.primary
                                       : null,
                                   fontFamily: fontFamily,

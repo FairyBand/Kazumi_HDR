@@ -1,15 +1,18 @@
 // ignore_for_file: library_private_types_in_public_api
 
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:flutter/services.dart';
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/pages/player/controller/player_debug_controller.dart';
+import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
 import 'package:kazumi/services/shaders/shader_asset_service.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/network/proxy_utils.dart';
+import 'package:kazumi/services/network/system_proxy_service.dart';
+import 'package:kazumi/services/player/playback_cache_policy.dart';
 import 'package:kazumi/services/player/player_screenshot_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:media_kit/media_kit.dart';
@@ -24,53 +27,71 @@ part 'player_playback_controller.g.dart';
 class PlayerPlaybackController = _PlayerPlaybackController
     with _$PlayerPlaybackController;
 
-abstract class _PlayerPlaybackController with Store {
-  static const MethodChannel _mediaKitVideoChannel =
-      MethodChannel('com.alexmercerind/media_kit_video');
+final class _OwnedPlayer {
+  _OwnedPlayer(this.player);
 
+  final Player player;
+  Future<void>? _disposeFuture;
+
+  Future<void> dispose() {
+    return _disposeFuture ??= _dispose();
+  }
+
+  Future<void> _dispose() async {
+    try {
+      await player.dispose();
+    } catch (error, stackTrace) {
+      KazumiLogger().e(
+        'PlayerPlaybackController: failed to dispose media player',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      try {
+        await player.stop();
+      } catch (_) {}
+    }
+  }
+}
+
+abstract class _PlayerPlaybackController with Store {
   _PlayerPlaybackController({
     required this.shaderAssetService,
     required this.debug,
     required this.videoUrl,
-    required this.onExitSyncPlayRoom,
+    required this.isLocalPlayback,
   });
 
   final ShaderAssetService shaderAssetService;
   final PlayerDebugController debug;
   final String Function() videoUrl;
-  final Future<void> Function() onExitSyncPlayRoom;
+  final bool Function() isLocalPlayback;
   final PlayerScreenshotService screenshotService =
       const PlayerScreenshotService();
+  late final PlaybackCachePolicy cachePolicy = PlaybackCachePolicy(
+    isLocalPlayback: isLocalPlayback,
+    currentPlayer: () => mediaPlayer,
+  );
 
   bool? _androidHdrWindowModeEnabled;
 
-  Player? mediaPlayer;
+  _OwnedPlayer? _ownedPlayer;
+  Player? get mediaPlayer => _ownedPlayer?.player;
   VideoController? videoController;
 
   bool hAenable = true;
   late String hardwareDecoder;
   bool androidEnableOpenSLES = true;
-  bool lowMemoryMode = false;
   bool autoPlay = true;
   bool playerDebugMode = false;
   int buttonSkipTime = 80;
   int arrowKeySkipTime = 10;
 
-  /// 视频超分
-  /// 1. OFF
-  /// 2. Anime4K Efficiency
-  /// 3. Anime4K Quality
-  /// 4. MPV HDR
-  /// 5. MPV HDR + Efficiency
-  /// 6. MPV HDR + Quality
-  /// 7. RTX HDR
-  /// 8. RTX HDR + Efficiency
-  /// 9. RTX HDR + Quality
-  @observable
-  int superResolutionType = 1;
+  /// 历史记录传入的 offset
+  int startOffset = 0;
 
+  /// 当前超分辨率模式
   @observable
-  bool supportsRtxHdr = false;
+  SuperResolutionMode superResolutionMode = SuperResolutionMode.off;
 
   @observable
   double volume = -1;
@@ -99,14 +120,18 @@ abstract class _PlayerPlaybackController with Store {
     return identical(mediaPlayer, player);
   }
 
-  Future<Player?> _discardIfNotCurrent(Player player) async {
-    if (isCurrentPlayer(player)) {
-      return player;
+  Future<Player?> _discardIfNotCurrent(_OwnedPlayer candidate) async {
+    if (identical(_ownedPlayer, candidate)) {
+      return candidate.player;
     }
-    try {
-      await player.dispose();
-    } catch (_) {}
+    await candidate.dispose();
     return null;
+  }
+
+  Future<void> _cancelDebugInfo() async {
+    try {
+      await debug.cancel();
+    } catch (_) {}
   }
 
   @action
@@ -118,6 +143,36 @@ abstract class _PlayerPlaybackController with Store {
     buffer = Duration.zero;
     duration = Duration.zero;
     completed = false;
+    startOffset = 0;
+  }
+
+  /// 本次会话是否从距结尾 [nearEndWatchedThreshold] 以内的位置起播。
+  /// 这样的"播放完成"并非真正看完，应从头重播而非切下一集
+  bool get resumedNearEnd {
+    if (startOffset <= 0 || duration <= Duration.zero) {
+      return false;
+    }
+    return Duration(seconds: startOffset) >= duration - nearEndWatchedThreshold;
+  }
+
+  /// 从头重播当前视频。[startOffset] 在重播落地后才归零，
+  /// 避免自动连播在此期间抢先触发
+  Future<void> restartFromBeginning() async {
+    final player = mediaPlayer;
+    if (player == null) {
+      return;
+    }
+    try {
+      await player.seek(Duration.zero);
+      if (!isCurrentPlayer(player)) {
+        return;
+      }
+      await player.play();
+      startOffset = 0;
+    } catch (e) {
+      KazumiLogger()
+          .w('PlayerController: failed to restart from beginning', error: e);
+    }
   }
 
   bool get playerPlaying {
@@ -177,231 +232,228 @@ abstract class _PlayerPlaybackController with Store {
   }
 
   Future<Player?> createVideoController(
-      Map<String, String> httpHeaders, bool adBlockerEnabled,
-      {int offset = 0}) async {
-    superResolutionType =
-        GStorage.getSetting(SettingsKeys.defaultSuperResolutionType);
-    supportsRtxHdr = await ensureSupportsRtxHdr();
-    if (!_isHdrTypeSupportedOnCurrentPlatform(superResolutionType)) {
-      superResolutionType = 1;
-      await GStorage.putSetting(SettingsKeys.defaultSuperResolutionType, 1);
-    }
-    await _setAndroidHdrWindowMode(
-      _usesAndroidNativeMpvHdrPath(superResolutionType),
+    Map<String, String> httpHeaders,
+    bool adBlockerEnabled, {
+    required bool Function() canInstall,
+    int offset = 0,
+  }) async {
+    startOffset = offset;
+    superResolutionMode = SuperResolutionMode.fromStorageValue(
+      GStorage.getSetting(SettingsKeys.defaultSuperResolutionMode),
     );
+    if (_isMpvHdrMode(superResolutionMode) && !_supportsMpvHdr()) {
+      superResolutionMode = SuperResolutionMode.off;
+      await GStorage.putSetting(
+        SettingsKeys.defaultSuperResolutionMode,
+        SuperResolutionMode.off.storageValue,
+      );
+    }
     hAenable = GStorage.getSetting(SettingsKeys.hAenable);
     androidEnableOpenSLES =
         GStorage.getSetting(SettingsKeys.androidEnableOpenSLES);
     hardwareDecoder = GStorage.getSetting(SettingsKeys.hardwareDecoder);
     autoPlay = GStorage.getSetting(SettingsKeys.autoPlay);
-    lowMemoryMode = GStorage.getSetting(SettingsKeys.lowMemoryMode);
     playerDebugMode = GStorage.getSetting(SettingsKeys.playerDebugMode);
 
-    final Player player = Player(
-      configuration: PlayerConfiguration(
-        vo: 'null',
-        bufferSize: lowMemoryMode ? 15 * 1024 * 1024 : 1500 * 1024 * 1024,
-        osc: _usesWindowsNativeHdrPath(superResolutionType),
-        logLevel: MPVLogLevel.values[debug.playerLogLevel],
-        adBlocker: adBlockerEnabled,
+    if (!canInstall()) {
+      return null;
+    }
+    final candidate = _OwnedPlayer(
+      Player(
+        configuration: PlayerConfiguration(
+          bufferSize: cachePolicy.bufferSize,
+          osc: false,
+          logLevel: MPVLogLevel.values[debug.playerLogLevel],
+          adBlocker: adBlockerEnabled,
+        ),
       ),
     );
-    mediaPlayer = player;
+    final player = candidate.player;
+    if (!canInstall()) {
+      await candidate.dispose();
+      return null;
+    }
+    _ownedPlayer = candidate;
+    cachePolicy.startWatching();
 
-    debug.playerLog.clear();
-    await debug.setup(
-      player,
-      isCurrentPlayer: isCurrentPlayer,
-      playerDebugMode: playerDebugMode,
-    );
-    if (!isCurrentPlayer(player)) {
-      return await _discardIfNotCurrent(player);
-    }
-
-    var pp = player.platform as NativePlayer;
-    // media-kit 默认启用硬盘作为双重缓存，这可以维持大缓存的前提下减轻内存压力
-    // media-kit 内部硬盘缓存目录按照 Linux 配置，这导致该功能在其他平台上被损坏
-    // 该设置可以在所有平台上正确启用双重缓存
-    await pp.setProperty("demuxer-cache-dir", await getPlayerTempPath());
-    if (!isCurrentPlayer(player)) {
-      return await _discardIfNotCurrent(player);
-    }
-    await pp.setProperty("af", "scaletempo2=max-speed=8");
-    if (!isCurrentPlayer(player)) {
-      return await _discardIfNotCurrent(player);
-    }
-    if (Platform.isAndroid) {
-      await pp.setProperty("volume-max", "100");
+    try {
+      debug.playerLog.clear();
+      await debug.setup(
+        player,
+        isCurrentPlayer: isCurrentPlayer,
+        playerDebugMode: playerDebugMode,
+      );
       if (!isCurrentPlayer(player)) {
-        return await _discardIfNotCurrent(player);
+        return await _discardIfNotCurrent(candidate);
       }
-      if (androidEnableOpenSLES) {
-        await pp.setProperty("ao", "opensles");
-      } else {
-        await pp.setProperty("ao", "audiotrack");
-      }
+
+      var pp = player.platform as NativePlayer;
+      // media-kit 默认启用硬盘作为双重缓存，这可以维持大缓存的前提下减轻内存压力
+      // media-kit 内部硬盘缓存目录按照 Linux 配置，这导致该功能在其他平台上被损坏
+      // 该设置可以在所有平台上正确启用双重缓存
+      await pp.setProperty("demuxer-cache-dir", await getPlayerTempPath());
       if (!isCurrentPlayer(player)) {
-        return await _discardIfNotCurrent(player);
+        return await _discardIfNotCurrent(candidate);
       }
-    }
-    final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
-    if (proxyEnable) {
-      final String proxyUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
-      final formattedProxy = ProxyUtils.getFormattedProxyUrl(proxyUrl);
-      if (formattedProxy != null) {
-        await pp.setProperty("http-proxy", formattedProxy);
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(player);
-        }
-        KazumiLogger().i('Player: HTTP 代理设置成功 $formattedProxy');
+      await cachePolicy.apply();
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
       }
-    }
-
-    await player.setAudioTrack(
-      AudioTrack.auto(),
-    );
-    if (!isCurrentPlayer(player)) {
-      return await _discardIfNotCurrent(player);
-    }
-
-    String? videoRenderer;
-    if (Platform.isAndroid) {
-      final String androidVideoRenderer =
-          GStorage.getSetting(SettingsKeys.androidVideoRenderer);
-
-      if (androidVideoRenderer == 'auto') {
-        // Android 14 及以上使用基于 Vulkan 的 MPV GPU-NEXT 视频输出，着色器性能更好
-        // GPU-NEXT 需要 Vulkan 1.2 支持
-        // 避免 Android 14 及以下设备上部分机型 Vulkan 支持不佳导致的黑屏问题
-        final int androidSdkVersion =
-            await PlatformEnvironmentService.getAndroidSdkVersion();
+      await pp.setProperty("af", "scaletempo2=max-speed=8");
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
+      }
+      if (Platform.isAndroid) {
+        await pp.setProperty("volume-max", "100");
         if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(player);
+          return await _discardIfNotCurrent(candidate);
         }
-        if (androidSdkVersion >= 34) {
-          videoRenderer = 'gpu-next';
+        if (androidEnableOpenSLES) {
+          await pp.setProperty("ao", "opensles");
         } else {
-          videoRenderer = 'gpu';
+          await pp.setProperty("ao", "audiotrack");
         }
-      } else {
-        videoRenderer = androidVideoRenderer;
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
       }
-    }
 
-    if (_usesAndroidNativeMpvHdrPath(superResolutionType)) {
-      videoRenderer = 'gpu-next';
-      hAenable = true;
-      hardwareDecoder = 'mediacodec';
-      KazumiLogger().i('Player: Android native Surface gpu-next HDR requested');
-    }
-
-    if (videoRenderer == 'mediacodec_embed') {
-      hAenable = true;
-      hardwareDecoder = 'mediacodec';
-      superResolutionType = 1;
-    }
-    if (_usesWindowsNativeHdrPath(superResolutionType)) {
-      videoRenderer = 'gpu-next';
-      hAenable = true;
-      hardwareDecoder = 'd3d11va';
-      try {
-        await pp.setProperty("gpu-api", "d3d11");
-        if (_isMpvHdrType(superResolutionType)) {
-          await pp.setProperty("d3d11-output-format", "rgb10_a2");
-          await pp.setProperty("d3d11-output-csp", "pq");
+      final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
+      if (proxyEnable) {
+        final String proxyUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
+        final formattedProxy = ProxyUtils.getFormattedProxyUrl(proxyUrl);
+        if (formattedProxy != null) {
+          await pp.setProperty("http-proxy", formattedProxy);
+          if (!isCurrentPlayer(player)) {
+            return await _discardIfNotCurrent(candidate);
+          }
+          KazumiLogger().i('Player: HTTP 代理设置成功 $formattedProxy');
         }
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(player);
+      } else if (SystemProxyService.isActive) {
+        final proxy = SystemProxyService.proxyFor('https');
+        if (proxy != null) {
+          await pp.setProperty("http-proxy", 'http://${proxy.$1}:${proxy.$2}');
+          if (!isCurrentPlayer(player)) {
+            return await _discardIfNotCurrent(candidate);
+          }
+          KazumiLogger().i('Player: 跟随系统代理 http://${proxy.$1}:${proxy.$2}');
         }
-        await pp.setProperty("osc", "yes");
-        await pp.setProperty("input-default-bindings", "yes");
-        await pp.setProperty("input-vo-keyboard", "yes");
-        await pp.setProperty("cursor-autohide", "1000");
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(player);
-        }
-        KazumiLogger().i('Player: Windows native gpu-next output requested');
-      } catch (e) {
-        KazumiLogger().w('PlayerController: failed to set HDR renderer options',
-            error: e);
       }
-    }
 
-    videoController = VideoController(
-      player,
-      configuration: VideoControllerConfiguration(
-        vo: videoRenderer,
-        enableHardwareAcceleration: hAenable,
-        hwdec: hAenable ? hardwareDecoder : 'no',
-        windowsNativeWindow: _usesWindowsNativeHdrPath(superResolutionType),
-        windowsNativeRtxHdr: _usesWindowsNativeHdrPath(superResolutionType) &&
-            _isRtxHdrType(superResolutionType),
-        androidNativeSurfaceView:
-            _usesAndroidNativeMpvHdrPath(superResolutionType),
-        androidAttachSurfaceAfterVideoParameters: false,
-      ),
-    );
-    player.setPlaylistMode(PlaylistMode.none);
-    if (!isCurrentPlayer(player)) {
-      return await _discardIfNotCurrent(player);
-    }
+      await player.setAudioTrack(
+        AudioTrack.auto(),
+      );
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
+      }
 
-    bool showPlayerError = GStorage.getSetting(SettingsKeys.showPlayerError);
-    player.stream.error.listen((event) {
-      if (showPlayerError) {
-        if (!isCurrentPlayer(player)) {
-          return;
-        }
-        if (event.toString().contains('Failed to open') && playerBuffering) {
-          KazumiDialog.showToast(
-              message: '加载失败, 请尝试更换其他视频来源', showActionButton: true);
+      String? videoRenderer;
+      if (Platform.isAndroid) {
+        final String androidVideoRenderer =
+            GStorage.getSetting(SettingsKeys.androidVideoRenderer);
+
+        if (androidVideoRenderer == 'auto') {
+          // Android 14 及以上使用基于 Vulkan 的 MPV GPU-NEXT 视频输出，着色器性能更好
+          // GPU-NEXT 需要 Vulkan 1.2 支持
+          // 避免 Android 13 及以下设备上部分机型 Vulkan 支持不佳导致的黑屏问题
+          final int androidSdkVersion =
+              await PlatformEnvironmentService.getAndroidSdkVersion();
+          if (!isCurrentPlayer(player)) {
+            return await _discardIfNotCurrent(candidate);
+          }
+          if (androidSdkVersion >= 34) {
+            videoRenderer = 'gpu-next';
+          } else {
+            videoRenderer = 'gpu';
+          }
         } else {
-          KazumiDialog.showToast(
-              message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
-              duration: const Duration(seconds: 5),
-              showActionButton: true);
+          videoRenderer = androidVideoRenderer;
         }
       }
-      KazumiLogger().e('PlayerController: Player intent error ${videoUrl()}',
-          error: event);
-    });
 
-    if (superResolutionType != 1) {
-      await setShader(superResolutionType, player: player);
-      if (!isCurrentPlayer(player)) {
-        return await _discardIfNotCurrent(player);
+      if (_isMpvHdrMode(superResolutionMode)) {
+        videoRenderer = 'gpu-next';
+        hAenable = true;
+        hardwareDecoder = Platform.isAndroid ? 'mediacodec' : 'd3d11va';
+        await _setAndroidHdrWindowMode(true);
       }
-    }
 
-    await player.open(
-      Media(videoUrl(),
-          start: Duration(seconds: offset), httpHeaders: httpHeaders),
-      play: autoPlay,
-    );
-    if (!isCurrentPlayer(player)) {
-      return await _discardIfNotCurrent(player);
-    }
-    if (_isRtxHdrType(superResolutionType)) {
-      await _applyRtxHdrAfterOpen(player);
-      if (!isCurrentPlayer(player)) {
-        return await _discardIfNotCurrent(player);
+      if (videoRenderer == 'mediacodec_embed') {
+        hAenable = true;
+        hardwareDecoder = 'mediacodec';
+        superResolutionMode = SuperResolutionMode.off;
       }
-    }
 
-    return player;
+      videoController ??= VideoController(
+        player,
+        configuration: VideoControllerConfiguration(
+          vo: videoRenderer,
+          enableHardwareAcceleration: hAenable,
+          enableAndroidSurfaceProducer: false,
+          hwdec: hAenable ? hardwareDecoder : 'no',
+          androidAttachSurfaceAfterVideoParameters: false,
+        ),
+      );
+      player.setPlaylistMode(PlaylistMode.none);
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
+      }
+
+      bool showPlayerError = GStorage.getSetting(SettingsKeys.showPlayerError);
+      player.stream.error.listen((event) {
+        if (showPlayerError) {
+          if (!isCurrentPlayer(player)) {
+            return;
+          }
+          if (event.toString().contains('Failed to open') && playerBuffering) {
+            KazumiDialog.showToast(
+                message: '加载失败, 请尝试更换其他视频来源', showActionButton: true);
+          } else {
+            KazumiDialog.showToast(
+                message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
+                duration: const Duration(seconds: 5),
+                showActionButton: true);
+          }
+        }
+        KazumiLogger().e('PlayerController: Player intent error ${videoUrl()}',
+            error: event);
+      });
+
+      if (superResolutionMode != SuperResolutionMode.off) {
+        await setShader(superResolutionMode, player: player);
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+      }
+
+      await player.open(
+        Media(videoUrl(),
+            start: Duration(seconds: offset), httpHeaders: httpHeaders),
+        play: autoPlay,
+      );
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
+      }
+
+      if (cachePolicy.networkForced) {
+        KazumiDialog.showToast(message: '正在使用移动数据，已临时启用低内存模式以减少缓存');
+      }
+
+      return player;
+    } catch (error, stackTrace) {
+      if (identical(_ownedPlayer, candidate)) {
+        cachePolicy.stopWatching();
+        _ownedPlayer = null;
+        videoController = null;
+      }
+      await candidate.dispose();
+      Error.throwWithStackTrace(error, stackTrace);
+    }
   }
 
-  Future<void> setShader(int type,
-      {bool synchronized = true, Player? player}) async {
+  Future<void> setShader(SuperResolutionMode mode, {Player? player}) async {
     final currentPlayer = player ?? mediaPlayer;
     if (currentPlayer == null) return;
-    if (_isMpvHdrType(type) && !_isMpvHdrSupportedOnCurrentPlatform()) {
-      type = 1;
-    }
-    if (_isRtxHdrType(type) && !await ensureSupportsRtxHdr()) {
-      type = 1;
-      await GStorage.putSetting(SettingsKeys.defaultSuperResolutionType, 1);
-    }
     try {
       var pp = currentPlayer.platform as NativePlayer;
       await pp.waitForPlayerInitialization;
@@ -409,376 +461,149 @@ abstract class _PlayerPlaybackController with Store {
       if (!identical(mediaPlayer, currentPlayer)) {
         return;
       }
-      if (!_usesAndroidNativeMpvHdrPath(type)) {
-        await _setAndroidHdrWindowMode(false);
-      }
-      if (type == 2) {
-        await _setMpvHdrOutput(pp, enabled: false);
-        await pp.command(['change-list', 'vf', 'clr', '']);
-        await pp.command([
-          'change-list',
-          'glsl-shaders',
-          'set',
-          buildShadersAbsolutePath(
-              shaderAssetService.shadersDirectory.path, mpvAnime4KShadersLite),
-        ]);
-        superResolutionType = 2;
-        return;
-      }
-      if (type == 3) {
-        await _setMpvHdrOutput(pp, enabled: false);
-        await pp.command(['change-list', 'vf', 'clr', '']);
-        await pp.command([
-          'change-list',
-          'glsl-shaders',
-          'set',
-          buildShadersAbsolutePath(
-              shaderAssetService.shadersDirectory.path, mpvAnime4KShaders),
-        ]);
-        superResolutionType = 3;
-        return;
-      }
-      if (_isMpvHdrType(type)) {
+      if (_isMpvHdrMode(mode)) {
         await _setAndroidHdrWindowMode(true);
-        await _setMpvHdrRendererOptions(pp);
-        if (_usesAnime4KLite(type)) {
-          await pp.command([
-            'change-list',
-            'glsl-shaders',
-            'set',
-            _buildShaderChain(shaders: mpvAnime4KShadersLite),
-          ]);
-        } else if (_usesAnime4KQuality(type)) {
-          await pp.command([
-            'change-list',
-            'glsl-shaders',
-            'set',
-            _buildShaderChain(shaders: mpvAnime4KShaders),
-          ]);
-        } else {
-          await pp.command(['change-list', 'glsl-shaders', 'clr', '']);
-        }
-        await _setMpvHdrOutput(pp, enabled: true);
-        superResolutionType = type;
-        return;
+        await _configureMpvHdr(pp);
+      } else {
+        await _setAndroidHdrWindowMode(false);
+        await _resetMpvHdr(pp);
       }
-      await _setAndroidHdrWindowMode(false);
-      if (_isRtxHdrType(type)) {
-        await pp.setProperty("gpu-api", "d3d11");
-        await pp.setProperty("hwdec", "d3d11va");
-        if (_usesAnime4KLite(type)) {
+      switch (mode) {
+        case SuperResolutionMode.efficiency:
           await pp.command([
             'change-list',
             'glsl-shaders',
             'set',
-            _buildShaderChain(
-              shaders: mpvAnime4KShadersLite,
-              includeMpvHdr: false,
+            buildShadersAbsolutePath(
+              shaderAssetService.shadersDirectory.path,
+              mpvAnime4KShadersLite,
             ),
           ]);
-        } else if (_usesAnime4KQuality(type)) {
+          break;
+        case SuperResolutionMode.quality:
           await pp.command([
             'change-list',
             'glsl-shaders',
             'set',
-            _buildShaderChain(
-              shaders: mpvAnime4KShaders,
-              includeMpvHdr: false,
+            buildShadersAbsolutePath(
+              shaderAssetService.shadersDirectory.path,
+              mpvAnime4KShaders,
             ),
           ]);
-        } else {
+          break;
+        case SuperResolutionMode.mpvHdr:
           await pp.command(['change-list', 'glsl-shaders', 'clr', '']);
-        }
-        await _setMpvHdrOutput(pp, enabled: false, clearVideoFilters: false);
-        await _setRtxHdrCandidateOutput(pp);
-        superResolutionType = type;
-        return;
+          break;
+        case SuperResolutionMode.mpvHdrEfficiency:
+          await pp.command([
+            'change-list',
+            'glsl-shaders',
+            'set',
+            buildShadersAbsolutePath(
+              shaderAssetService.shadersDirectory.path,
+              mpvAnime4KShadersLite,
+            ),
+          ]);
+          break;
+        case SuperResolutionMode.mpvHdrQuality:
+          await pp.command([
+            'change-list',
+            'glsl-shaders',
+            'set',
+            buildShadersAbsolutePath(
+              shaderAssetService.shadersDirectory.path,
+              mpvAnime4KShaders,
+            ),
+          ]);
+          break;
+        case SuperResolutionMode.off:
+          await pp.command(['change-list', 'glsl-shaders', 'clr', '']);
+          break;
       }
-      await _setMpvHdrOutput(pp, enabled: false);
-      await pp.command(['change-list', 'vf', 'clr', '']);
-      await pp.command(['change-list', 'glsl-shaders', 'clr', '']);
-      superResolutionType = 1;
+      superResolutionMode = mode;
     } catch (e) {
       KazumiLogger().w('PlayerController: failed to set shader', error: e);
     }
   }
 
-  bool _isMpvHdrType(int type) {
-    return type >= 4 && type <= 6;
+  bool _isMpvHdrMode(SuperResolutionMode mode) {
+    return switch (mode) {
+      SuperResolutionMode.mpvHdr ||
+      SuperResolutionMode.mpvHdrEfficiency ||
+      SuperResolutionMode.mpvHdrQuality =>
+        true,
+      _ => false,
+    };
   }
 
-  bool _isRtxHdrType(int type) {
-    return type >= 7 && type <= 9;
-  }
-
-  bool _isWindowsNativeHdrType(int type) {
-    return _isMpvHdrType(type) || _isRtxHdrType(type);
-  }
-
-  bool _isMpvHdrSupportedOnCurrentPlatform() {
-    return Platform.isWindows || Platform.isAndroid;
-  }
-
-  bool _isHdrTypeSupportedOnCurrentPlatform(int type) {
-    if (_isMpvHdrType(type)) {
-      return _isMpvHdrSupportedOnCurrentPlatform();
-    }
-    if (_isRtxHdrType(type)) {
-      return Platform.isWindows && supportsRtxHdr;
-    }
-    return true;
-  }
-
-  bool _usesWindowsNativeHdrPath(int type) {
-    return Platform.isWindows && _isWindowsNativeHdrType(type);
-  }
-
-  bool _usesAndroidNativeMpvHdrPath(int type) {
-    return Platform.isAndroid && _isMpvHdrType(type);
-  }
+  bool _supportsMpvHdr() => Platform.isWindows || Platform.isAndroid;
 
   Future<void> _setAndroidHdrWindowMode(bool enabled) async {
-    if (!Platform.isAndroid) {
-      return;
-    }
-    if (_androidHdrWindowModeEnabled == enabled) {
-      return;
-    }
+    if (!Platform.isAndroid || _androidHdrWindowModeEnabled == enabled) return;
     final applied = await PlatformEnvironmentService.setAndroidHdrMode(enabled);
     _androidHdrWindowModeEnabled = enabled;
     KazumiLogger().i(
-      'Player: Android HDR window mode ${enabled ? 'enabled' : 'disabled'}'
-      ' result=$applied',
+      'Player: Android HDR window mode ${enabled ? 'enabled' : 'disabled'} result=$applied',
     );
   }
 
-  Future<bool> ensureSupportsRtxHdr() async {
-    if (!Platform.isWindows) {
-      supportsRtxHdr = false;
-      return false;
-    }
-    supportsRtxHdr = await PlatformEnvironmentService.hasSupportedRtxGpu();
-    return supportsRtxHdr;
-  }
-
-  bool get usesWindowsNativeHdr =>
-      _usesWindowsNativeHdrPath(superResolutionType);
-
-  bool get usesAndroidNativeMpvHdr =>
-      _usesAndroidNativeMpvHdrPath(superResolutionType);
-
-  bool _usesAnime4KLite(int type) {
-    return type == 2 || type == 5 || type == 8;
-  }
-
-  bool _usesAnime4KQuality(int type) {
-    return type == 3 || type == 6 || type == 9;
-  }
-
-  String _buildShaderChain({
-    List<String> shaders = const [],
-    bool includeMpvHdr = false,
-  }) {
-    return buildShadersAbsolutePath(
-      shaderAssetService.shadersDirectory.path,
-      [
-        ...shaders,
-        if (includeMpvHdr) mpvHdrItmShader,
-      ],
-    );
-  }
-
-  Future<void> _setMpvHdrOutput(
-    NativePlayer pp, {
-    required bool enabled,
-    bool clearVideoFilters = true,
-  }) async {
-    if (enabled) {
-      await _applyMpvProfile(pp, 'gpu-hq');
-      if (clearVideoFilters) {
-        await pp.command(['change-list', 'vf', 'clr', '']);
-      }
-      await pp.setProperty("target-trc", Platform.isAndroid ? "hlg" : "pq");
-      await pp.setProperty(
-        "target-prim",
-        Platform.isAndroid ? "display-p3" : "bt.2020",
-      );
-      await pp.setProperty(
-        "target-gamut",
-        Platform.isWindows ? "display-p3" : "auto",
-      );
-      await pp.setProperty("target-colorspace-hint", "yes");
-      await pp.setProperty("target-colorspace-hint-strict", "no");
-      if (Platform.isWindows) {
-        await pp.setProperty("d3d11-output-format", "rgb10_a2");
-        await pp.setProperty("d3d11-output-csp", "pq");
-      }
-      await pp.setProperty("target-peak", await _mpvHdrTargetPeak());
-      await pp.setProperty("hdr-reference-white", "203");
-      await pp.setProperty("hdr-compute-peak", "no");
-      await pp.setProperty("hdr-peak-percentile", "100.0");
-      await pp.setProperty("hdr-peak-decay-rate", "20.0");
-      await pp.setProperty("tone-mapping", "spline");
-      await pp.setProperty("gamut-mapping-mode", "clip");
-      await pp.setProperty("hdr-contrast-recovery", "0.0");
-      await pp.setProperty("hdr-contrast-smoothness", "3.5");
-      await pp.setProperty("inverse-tone-mapping", "yes");
-      await pp.setProperty("video-sync", "display-resample");
-      await pp.setProperty("interpolation", "no");
-      return;
-    }
-    if (clearVideoFilters) {
-      await pp.command(['change-list', 'vf', 'clr', '']);
-    }
-    await pp.setProperty("inverse-tone-mapping", "no");
-    await pp.setProperty("hdr-compute-peak", "no");
-    await pp.setProperty("hdr-peak-percentile", "100.0");
-    await pp.setProperty("hdr-peak-decay-rate", "20.0");
-    await pp.setProperty("target-peak", "auto");
-    await pp.setProperty("hdr-reference-white", "auto");
-    await pp.setProperty("dither-depth", "auto");
-    await pp.setProperty("tone-mapping", "auto");
-    await pp.setProperty("tone-mapping-param", "0.0");
-    await pp.setProperty("tone-mapping-max-boost", "1.0");
-    await pp.setProperty("gamut-mapping-mode", "auto");
-    await pp.setProperty("hdr-contrast-recovery", "0.0");
-    await pp.setProperty("hdr-contrast-smoothness", "3.5");
-    await pp.setProperty("target-prim", "auto");
-    await pp.setProperty("target-trc", "auto");
-    await pp.setProperty("target-gamut", "auto");
-    await pp.setProperty("target-colorspace-hint", "auto");
-    await pp.setProperty("target-colorspace-hint-strict", "yes");
+  Future<void> _configureMpvHdr(NativePlayer pp) async {
+    await pp.command(['apply-profile', 'gpu-hq']);
     if (Platform.isWindows) {
-      await pp.setProperty("d3d11-output-format", "auto");
-      await pp.setProperty("d3d11-output-csp", "auto");
+      await pp.setProperty('gpu-api', 'd3d11');
+      await pp.setProperty('hwdec', 'd3d11va');
+      await pp.setProperty('d3d11-output-format', 'rgb10_a2');
+      await pp.setProperty('d3d11-output-csp', 'pq');
+    } else if (Platform.isAndroid) {
+      await pp.setProperty('gpu-api', 'vulkan');
+      await pp.setProperty('hwdec', 'mediacodec');
     }
-    await pp.setProperty("video-sync", "audio");
-    await pp.setProperty("interpolation", "no");
+    await pp.setProperty('target-trc', Platform.isAndroid ? 'hlg' : 'pq');
+    await pp.setProperty(
+        'target-prim', Platform.isAndroid ? 'display-p3' : 'bt.2020');
+    await pp.setProperty(
+        'target-gamut', Platform.isWindows ? 'display-p3' : 'auto');
+    await pp.setProperty('target-colorspace-hint', 'yes');
+    await pp.setProperty('target-colorspace-hint-strict', 'no');
+    await pp.setProperty('target-peak', await _mpvHdrTargetPeak());
+    await pp.setProperty('hdr-reference-white', '203');
+    await pp.setProperty('hdr-compute-peak', 'no');
+    await pp.setProperty('tone-mapping', 'spline');
+    await pp.setProperty('gamut-mapping-mode', 'clip');
+    await pp.setProperty('inverse-tone-mapping', 'yes');
+    await pp.setProperty('video-sync', 'display-resample');
   }
 
-  Future<void> _setMpvHdrRendererOptions(NativePlayer pp) async {
+  Future<void> _resetMpvHdr(NativePlayer pp) async {
+    await pp.setProperty('inverse-tone-mapping', 'no');
+    await pp.setProperty('target-peak', 'auto');
+    await pp.setProperty('hdr-reference-white', 'auto');
+    await pp.setProperty('tone-mapping', 'auto');
+    await pp.setProperty('gamut-mapping-mode', 'auto');
+    await pp.setProperty('target-prim', 'auto');
+    await pp.setProperty('target-trc', 'auto');
+    await pp.setProperty('target-gamut', 'auto');
+    await pp.setProperty('target-colorspace-hint', 'auto');
+    await pp.setProperty('target-colorspace-hint-strict', 'yes');
     if (Platform.isWindows) {
-      await pp.setProperty("gpu-api", "d3d11");
-      await pp.setProperty("hwdec", "d3d11va");
-      return;
+      await pp.setProperty('d3d11-output-format', 'auto');
+      await pp.setProperty('d3d11-output-csp', 'auto');
     }
-    if (Platform.isAndroid) {
-      await pp.setProperty("gpu-api", "vulkan");
-      await pp.setProperty("hwdec", "mediacodec");
-    }
-  }
-
-  Future<void> _setRtxHdrCandidateOutput(NativePlayer pp) async {
-    final rtxHdrFilter = _rtxHdrFilter();
-    await _applyMpvProfile(pp, 'gpu-hq');
-    await pp.setProperty("target-colorspace-hint", "auto");
-    await pp.setProperty("target-colorspace-hint-strict", "yes");
-    await pp.setProperty("d3d11-output-format", "auto");
-    await pp.setProperty("d3d11-output-csp", "auto");
-    await pp.setProperty("dither-depth", "auto");
-    await pp.setProperty("target-trc", "auto");
-    await pp.setProperty("target-prim", "auto");
-    await pp.setProperty("target-peak", "auto");
-    await pp.setProperty("tone-mapping", "auto");
-    await pp.setProperty("tone-mapping-param", "0.0");
-    await pp.setProperty("tone-mapping-max-boost", "1.0");
-    await pp.setProperty("hdr-compute-peak", "no");
-    await pp.setProperty("inverse-tone-mapping", "no");
-    await pp.setProperty("vf", rtxHdrFilter);
-    KazumiLogger().i('Player: RTX HDR candidate path applied vf=$rtxHdrFilter');
-  }
-
-  Future<void> _applyRtxHdrAfterOpen(Player player) async {
-    if (!isCurrentPlayer(player) || !_isRtxHdrType(superResolutionType)) {
-      return;
-    }
-    try {
-      var pp = player.platform as NativePlayer;
-      await _setRtxHdrCandidateOutput(pp);
-      await _applyNativeRtxHdrFilter(player);
-      try {
-        await player.stream.videoParams
-            .firstWhere((params) =>
-                (params.dw ?? 0) > 0 &&
-                (params.dh ?? 0) > 0 &&
-                (params.pixelformat ?? '').isNotEmpty)
-            .timeout(const Duration(seconds: 2));
-      } catch (_) {}
-      if (!isCurrentPlayer(player) || !_isRtxHdrType(superResolutionType)) {
-        return;
-      }
-      await _setRtxHdrCandidateOutput(pp);
-      await _applyNativeRtxHdrFilter(player);
-    } catch (e) {
-      KazumiLogger()
-          .w('PlayerController: failed to re-apply RTX HDR filter', error: e);
-    }
-  }
-
-  Future<void> _applyNativeRtxHdrFilter(Player player) async {
-    if (!Platform.isWindows ||
-        !isCurrentPlayer(player) ||
-        !_isRtxHdrType(superResolutionType)) {
-      return;
-    }
-    try {
-      final handle = await player.handle;
-      final result = await _mediaKitVideoChannel.invokeMethod(
-        'VideoOutputManager.ApplyNativeRtxHdr',
-        {
-          'handle': handle.toString(),
-          'filter': _rtxHdrFilter(),
-        },
-      );
-      KazumiLogger().i('RTX HDR native result: $result');
-    } catch (e) {
-      KazumiLogger().w('PlayerController: native RTX HDR filter request failed',
-          error: e);
-    }
+    await pp.setProperty('video-sync', 'audio');
   }
 
   Future<String> _mpvHdrTargetPeak() async {
-    final configuredTargetPeak =
-        GStorage.getSetting(SettingsKeys.mpvHdrTargetPeak)
-            .clamp(100, 10000)
-            .toInt();
+    final configured = GStorage.getSetting(SettingsKeys.mpvHdrTargetPeak)
+        .clamp(100, 10000)
+        .toInt();
     if (Platform.isAndroid) {
       final capabilities =
           await PlatformEnvironmentService.getAndroidHdrDisplayCapabilities();
-      final detectedPeak = capabilities?.maxLuminance?.round();
-      final detectedAveragePeak = capabilities?.maxAverageLuminance?.round();
-      final androidTargetPeak =
-          (detectedPeak ?? detectedAveragePeak)?.clamp(100, 10000).toInt();
-      if (androidTargetPeak != null) {
-        KazumiLogger().i(
-          'Player: Android HDR display capabilities max=$detectedPeak nit'
-          ' avg=$detectedAveragePeak nit'
-          ' using targetPeak=$androidTargetPeak nit',
-        );
-        return androidTargetPeak.toString();
-      }
+      final detected = capabilities?.maxLuminance?.round() ??
+          capabilities?.maxAverageLuminance?.round();
+      if (detected != null) return detected.clamp(100, 10000).toString();
     }
-    return configuredTargetPeak.toString();
-  }
-
-  String _rtxHdrFilter() {
-    return 'd3d11vpp=format=x2bgr10:nvidia-true-hdr=yes,'
-        'format=max-luma=${_rtxHdrMaxLuma()}';
-  }
-
-  int _rtxHdrMaxLuma() {
-    return GStorage.getSetting(SettingsKeys.rtxHdrMaxLuma)
-        .clamp(100, 10000)
-        .toInt();
-  }
-
-  Future<void> _applyMpvProfile(NativePlayer pp, String profile) async {
-    try {
-      await pp.command(['apply-profile', profile]);
-    } catch (e) {
-      KazumiLogger().w('PlayerController: failed to apply mpv profile $profile',
-          error: e);
-    }
+    return configured.toString();
   }
 
   Future<void> setPlaybackSpeed(double playerSpeed) async {
@@ -871,38 +696,20 @@ abstract class _PlayerPlaybackController with Store {
     }
   }
 
-  Future<void> dispose({
-    bool disposeSyncPlayController = true,
-  }) async {
-    final player = mediaPlayer;
-    mediaPlayer = null;
-    videoController = null;
-    final cancelDebugInfoFuture = debug.cancel();
-    if (disposeSyncPlayController) {
-      try {
-        await onExitSyncPlayRoom();
-      } catch (_) {}
-    }
-    try {
-      await cancelDebugInfoFuture;
-    } catch (_) {}
-    try {
-      await player?.dispose();
-    } catch (_) {}
-    await _setAndroidHdrWindowMode(false);
-  }
-
   Future<void> stop() async {
-    try {
-      final player = mediaPlayer;
-      mediaPlayer = null;
-      videoController = null;
-      await debug.cancel();
-      await player?.stop();
-      await player?.dispose();
-      loading = true;
-    } catch (_) {}
+    cachePolicy.stopWatching();
     await _setAndroidHdrWindowMode(false);
+    final ownedPlayer = _ownedPlayer;
+    _ownedPlayer = null;
+    videoController = null;
+    playing = false;
+    loading = true;
+    // media_kit stops playback as part of disposal before releasing native
+    // resources. Debug subscriptions can be cancelled concurrently.
+    await Future.wait([
+      ownedPlayer?.dispose() ?? Future<void>.value(),
+      _cancelDebugInfo(),
+    ]);
   }
 
   Future<Uint8List?> screenshot({String format = 'image/jpeg'}) async {
