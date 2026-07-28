@@ -53,12 +53,13 @@ class D3D11Renderer {
   // as the Flutter compositor.  Pass nullptr to fall back to the legacy
   // heuristic (hardware default on Win10+, adapter 0 on older Windows).
   explicit D3D11Renderer(int32_t width, int32_t height,
-                         IDXGIAdapter* flutter_adapter = nullptr);
+                         IDXGIAdapter* flutter_adapter = nullptr,
+                         DXGI_FORMAT format = DXGI_FORMAT_B8G8R8A8_UNORM);
   ~D3D11Renderer();
 
   // Recreates the three mailbox slots at the new dimensions.
   // Must be called from the producer thread only.
-  void SetSize(int32_t width, int32_t height);
+  bool SetSize(int32_t width, int32_t height);
 
   // Called from the producer thread (mpv thread pool) after
   // mpv_render_context_render returns.  Signals the frame fence, then
@@ -82,6 +83,7 @@ class D3D11Renderer {
 
   int32_t width_ = 1;
   int32_t height_ = 1;
+  DXGI_FORMAT format_ = DXGI_FORMAT_B8G8R8A8_UNORM;
 
   Microsoft::WRL::ComPtr<ID3D11Device> d3d_11_device_;
   Microsoft::WRL::ComPtr<ID3D11DeviceContext> d3d_11_device_context_;

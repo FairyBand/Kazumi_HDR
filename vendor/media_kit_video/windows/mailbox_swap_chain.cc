@@ -11,13 +11,20 @@
 #include <iostream>
 
 MailboxSwapChain::~MailboxSwapChain() {
+  WaitForGpuIdle();
   ReleaseSlots();
+  if (resize_fence_event_) {
+    ::CloseHandle(resize_fence_event_);
+    resize_fence_event_ = nullptr;
+  }
 }
 
 HRESULT MailboxSwapChain::Create(ID3D11Device* device,
                                   int32_t width,
                                   int32_t height,
-                                  MailboxSwapChain** out) {
+                                  MailboxSwapChain** out,
+                                  DXGI_FORMAT format,
+                                  bool shared) {
   if (!device || !out) return E_INVALIDARG;
 
   auto* p = new (std::nothrow) MailboxSwapChain();
@@ -26,6 +33,8 @@ HRESULT MailboxSwapChain::Create(ID3D11Device* device,
   p->device_ = device;
   p->width_ = (width > 0) ? width : 1;
   p->height_ = (height > 0) ? height : 1;
+  p->format_ = format;
+  p->shared_ = shared;
 
   {
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> ctx;
@@ -36,6 +45,29 @@ HRESULT MailboxSwapChain::Create(ID3D11Device* device,
                    "(hr=0x" << std::hex << hr2 << std::dec << ")" << std::endl;
       delete p;
       return hr2;
+    }
+  }
+
+  {
+    Microsoft::WRL::ComPtr<ID3D11Device5> device5;
+    const HRESULT hr2 = device->QueryInterface(
+        __uuidof(ID3D11Device5),
+        reinterpret_cast<void**>(device5.GetAddressOf()));
+    if (FAILED(hr2)) {
+      delete p;
+      return hr2;
+    }
+    const HRESULT hr3 = device5->CreateFence(
+        0, D3D11_FENCE_FLAG_NONE, IID_PPV_ARGS(&p->resize_fence_));
+    if (FAILED(hr3)) {
+      delete p;
+      return hr3;
+    }
+    p->resize_fence_event_ = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!p->resize_fence_event_) {
+      const HRESULT event_hr = HRESULT_FROM_WIN32(::GetLastError());
+      delete p;
+      return event_hr;
     }
   }
 
@@ -100,7 +132,7 @@ MailboxSwapChain::GetDesc(DXGI_SWAP_CHAIN_DESC* pDesc) {
   *pDesc = {};
   pDesc->BufferDesc.Width = static_cast<UINT>(width_);
   pDesc->BufferDesc.Height = static_cast<UINT>(height_);
-  pDesc->BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  pDesc->BufferDesc.Format = format_;
   pDesc->BufferCount = 1;
   pDesc->SampleDesc.Count = 1;
   pDesc->BufferUsage =
@@ -191,6 +223,10 @@ HANDLE MailboxSwapChain::ConsumerAcquire() {
 }
 
 HRESULT MailboxSwapChain::Resize(int32_t width, int32_t height) {
+  const HRESULT idle_result = WaitForGpuIdle();
+  if (FAILED(idle_result)) {
+    return idle_result;
+  }
   ReleaseSlots();
   width_ = (width > 0) ? width : 1;
   height_ = (height > 0) ? height : 1;
@@ -198,6 +234,31 @@ HRESULT MailboxSwapChain::Resize(int32_t width, int32_t height) {
   latest_completed_slot_.store(2, std::memory_order_relaxed);
   write_slot_ = 0;
   return AllocateSlots();
+}
+
+HRESULT MailboxSwapChain::WaitForGpuIdle(DWORD timeout_ms) {
+  if (!context4_ || !resize_fence_ || !resize_fence_event_) {
+    return E_FAIL;
+  }
+  const uint64_t value = ++resize_fence_value_;
+  HRESULT result = context4_->Signal(resize_fence_.Get(), value);
+  if (FAILED(result)) {
+    return result;
+  }
+  result = resize_fence_->SetEventOnCompletion(value, resize_fence_event_);
+  if (FAILED(result)) {
+    return result;
+  }
+  context4_->Flush();
+  const DWORD wait_result =
+      ::WaitForSingleObject(resize_fence_event_, timeout_ms);
+  if (wait_result == WAIT_OBJECT_0) {
+    return S_OK;
+  }
+  if (wait_result == WAIT_TIMEOUT) {
+    return DXGI_ERROR_WAS_STILL_DRAWING;
+  }
+  return HRESULT_FROM_WIN32(::GetLastError());
 }
 
 HRESULT MailboxSwapChain::AllocateSlots() {
@@ -217,13 +278,16 @@ HRESULT MailboxSwapChain::AllocateSlots() {
   desc.Height = static_cast<UINT>(height_);
   desc.MipLevels = 1;
   desc.ArraySize = 1;
-  desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  desc.Format = format_;
   desc.SampleDesc.Count = 1;
   desc.SampleDesc.Quality = 0;
   desc.Usage = D3D11_USAGE_DEFAULT;
   desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+  if (format_ != DXGI_FORMAT_B8G8R8A8_UNORM) {
+    desc.BindFlags |= D3D11_BIND_UNORDERED_ACCESS;
+  }
   desc.CPUAccessFlags = 0;
-  desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
+  desc.MiscFlags = shared_ ? D3D11_RESOURCE_MISC_SHARED : 0;
 
   for (int i = 0; i < 4; ++i) {
     HRESULT hr = device_->CreateTexture2D(&desc, nullptr, &slots_[i].texture);
@@ -234,21 +298,23 @@ HRESULT MailboxSwapChain::AllocateSlots() {
       return hr;
     }
 
-    Microsoft::WRL::ComPtr<IDXGIResource> resource;
-    hr = slots_[i].texture.As(&resource);
-    if (FAILED(hr)) {
-      std::cout << "media_kit: MailboxSwapChain: As<IDXGIResource> slot " << i
-                << " failed (hr=0x" << std::hex << hr << std::dec << ")"
-                << std::endl;
-      return hr;
-    }
+    if (shared_) {
+      Microsoft::WRL::ComPtr<IDXGIResource> resource;
+      hr = slots_[i].texture.As(&resource);
+      if (FAILED(hr)) {
+        std::cout << "media_kit: MailboxSwapChain: As<IDXGIResource> slot " << i
+                  << " failed (hr=0x" << std::hex << hr << std::dec << ")"
+                  << std::endl;
+        return hr;
+      }
 
-    hr = resource->GetSharedHandle(&slots_[i].shared_handle);
-    if (FAILED(hr)) {
-      std::cout << "media_kit: MailboxSwapChain: GetSharedHandle slot " << i
-                << " failed (hr=0x" << std::hex << hr << std::dec << ")"
-                << std::endl;
-      return hr;
+      hr = resource->GetSharedHandle(&slots_[i].shared_handle);
+      if (FAILED(hr)) {
+        std::cout << "media_kit: MailboxSwapChain: GetSharedHandle slot " << i
+                  << " failed (hr=0x" << std::hex << hr << std::dec << ")"
+                  << std::endl;
+        return hr;
+      }
     }
 
     hr = device5->CreateFence(0, D3D11_FENCE_FLAG_NONE,

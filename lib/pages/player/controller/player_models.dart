@@ -36,6 +36,29 @@ class PlaybackInitParams {
     this.coverUrl,
     this.bangumiName,
   });
+
+  PlaybackInitParams copyWith({
+    int? offset,
+  }) {
+    return PlaybackInitParams(
+      videoUrl: videoUrl,
+      offset: offset ?? this.offset,
+      isLocalPlayback: isLocalPlayback,
+      bangumiId: bangumiId,
+      pluginName: pluginName,
+      episode: episode,
+      danmakuEpisodeNumber: danmakuEpisodeNumber,
+      pageUrl: pageUrl,
+      sortNumber: sortNumber,
+      httpHeaders: httpHeaders,
+      adBlockerEnabled: adBlockerEnabled,
+      episodeTitle: episodeTitle,
+      referer: referer,
+      currentRoad: currentRoad,
+      coverUrl: coverUrl,
+      bangumiName: bangumiName,
+    );
+  }
 }
 
 enum DanmakuDestination {

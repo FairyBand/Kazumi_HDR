@@ -16,8 +16,9 @@
 int D3D11Renderer::instance_count_ = 0;
 
 D3D11Renderer::D3D11Renderer(int32_t width, int32_t height,
-                             IDXGIAdapter* flutter_adapter)
-    : width_(width), height_(height) {
+                             IDXGIAdapter* flutter_adapter,
+                             DXGI_FORMAT format)
+    : width_(width), height_(height), format_(format) {
   if (!CreateD3D11Device(flutter_adapter)) {
     throw std::runtime_error("Unable to create Direct3D 11 device.");
   }
@@ -34,17 +35,19 @@ D3D11Renderer::~D3D11Renderer() {
   instance_count_--;
 }
 
-void D3D11Renderer::SetSize(int32_t width, int32_t height) {
-  if (width == width_ && height == height_) return;
-  width_ = width;
-  height_ = height;
+bool D3D11Renderer::SetSize(int32_t width, int32_t height) {
+  if (width == width_ && height == height_) return true;
   if (mailbox_swap_chain_) {
-    const HRESULT hr = mailbox_swap_chain_->Resize(width_, height_);
+    const HRESULT hr = mailbox_swap_chain_->Resize(width, height);
     if (FAILED(hr)) {
       std::cout << "media_kit: D3D11Renderer: Mailbox resize failed (hr=0x"
                 << std::hex << hr << std::dec << ")" << std::endl;
+      return false;
     }
   }
+  width_ = width;
+  height_ = height;
+  return true;
 }
 
 void D3D11Renderer::ProducerCommit() {
@@ -113,7 +116,10 @@ bool D3D11Renderer::CreateD3D11Device(IDXGIAdapter* flutter_adapter) {
   if (SUCCEEDED(d3d_11_device_->QueryInterface(__uuidof(IDXGIDevice),
                                                (void**)&dxgi_device)) &&
       dxgi_device) {
-    dxgi_device->SetGPUThreadPriority(5);
+    // Do not elevate video copies above Flutter's compositor work. Priority 5
+    // is the maximum DXGI GPU scheduling priority and can starve UI presents
+    // on a saturated or debug-instrumented device.
+    dxgi_device->SetGPUThreadPriority(0);
   }
 
   const auto level = d3d_11_device_->GetFeatureLevel();
@@ -127,7 +133,8 @@ bool D3D11Renderer::CreateD3D11Device(IDXGIAdapter* flutter_adapter) {
 bool D3D11Renderer::CreateMailbox() {
   MailboxSwapChain* raw = nullptr;
   const HRESULT hr =
-      MailboxSwapChain::Create(d3d_11_device_.Get(), width_, height_, &raw);
+      MailboxSwapChain::Create(d3d_11_device_.Get(), width_, height_, &raw,
+                               format_, true);
   if (FAILED(hr)) {
     std::cout << "media_kit: D3D11Renderer: MailboxSwapChain::Create failed "
                  "(hr=0x"

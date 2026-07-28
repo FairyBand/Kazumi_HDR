@@ -13,7 +13,11 @@ class DisplayModeService {
   static const _intentChannel = MethodChannel('com.predidit.kazumi/intent');
 
   static Future<void> enterFullScreen({bool lockOrientation = true}) async {
-    if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
+    if (Platform.isWindows) {
+      await _intentChannel.invokeMethod('enterFullscreen');
+      return;
+    }
+    if (Platform.isLinux || Platform.isMacOS) {
       await windowManager.setFullScreen(true);
       return;
     }
@@ -33,8 +37,13 @@ class DisplayModeService {
   }
 
   static Future<void> exitFullScreen({bool lockOrientation = true}) async {
-    if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
+    if (Platform.isWindows) {
+      await _intentChannel.invokeMethod('exitFullscreen');
+      return;
+    }
+    if (Platform.isLinux || Platform.isMacOS) {
       await windowManager.setFullScreen(false);
+      return;
     }
     try {
       if (Platform.isAndroid || Platform.isIOS) {

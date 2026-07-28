@@ -54,7 +54,7 @@ inline ThreadPool::ThreadPool(size_t threads) : stop_(false) {
     });
 #ifdef _WIN32
     ::SetThreadPriority(workers_.back().native_handle(),
-                        THREAD_PRIORITY_HIGHEST);
+                        THREAD_PRIORITY_NORMAL);
 #endif
   }
 }

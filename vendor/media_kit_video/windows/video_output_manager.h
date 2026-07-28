@@ -58,11 +58,20 @@ class VideoOutputManager {
                                              LONG client_origin_y);
 
   // Destroys the |VideoOutput| with given handle.
-  void Dispose(int64_t handle);
+  void Dispose(int64_t handle, std::function<void()> completion);
 
   ~VideoOutputManager();
 
  private:
+  struct PendingNativeRect {
+    int64_t left;
+    int64_t top;
+    int64_t width;
+    int64_t height;
+    int64_t clip_top;
+    int64_t clip_bottom;
+  };
+
   std::mutex mutex_ = std::mutex();
   // All the operations involving Direct3D 11 or libmpv must be performed on
   // same single thread to prevent any race conditions or invalid usage.
@@ -97,6 +106,7 @@ class VideoOutputManager {
   flutter::PluginRegistrarWindows* registrar_ = nullptr;
   std::function<void(std::function<void()>)> run_on_main_thread_ = nullptr;
   std::unordered_map<int64_t, std::unique_ptr<VideoOutput>> video_outputs_ = {};
+  std::unordered_map<int64_t, PendingNativeRect> pending_native_rects_ = {};
 };
 
 #endif  // VIDEO_OUTPUT_MANAGER_H_

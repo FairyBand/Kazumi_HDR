@@ -1,4 +1,5 @@
 #include "win32_window.h"
+#include "lifecycle_log.h"
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
@@ -179,7 +180,11 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_CLOSE:
+      kazumi::LifecycleLog("runner", "WM_CLOSE");
+      break;
     case WM_DESTROY:
+      kazumi::LifecycleLog("runner", "WM_DESTROY");
       window_handle_ = nullptr;
       Destroy();
       if (quit_on_close_) {

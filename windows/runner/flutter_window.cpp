@@ -1,9 +1,11 @@
 #include "flutter_window.h"
 #include "fullscreen_utils.h"
+#include "hdr_test_surface.h"
 #include "external_player_utils.h"
 #include "shortcut_utils.h"
 
 #include <optional>
+#include <iterator>
 #include <dwmapi.h>
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
@@ -29,6 +31,13 @@
 #endif
 
 namespace {
+
+bool IsHdrDcompTestEnabled() {
+  wchar_t value[8] = {};
+  DWORD length = GetEnvironmentVariableW(L"KAZUMI_HDR_DCOMP_TEST", value,
+                                         static_cast<DWORD>(std::size(value)));
+  return length > 0 && length < std::size(value) && value[0] == L'1';
+}
 
 HRESULT ApplyTitleBarAppearance(HWND window, bool dark) {
   BOOL enable_dark_mode = dark;
@@ -77,6 +86,18 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  if (IsHdrDcompTestEnabled()) {
+    RECT view_bounds = {};
+    GetClientRect(flutter_controller_->view()->GetNativeWindow(), &view_bounds);
+    hdr_test_surface_ = std::make_unique<HdrTestSurface>();
+    if (!hdr_test_surface_->Initialize(
+            flutter_controller_->engine(),
+            static_cast<uint32_t>(view_bounds.right - view_bounds.left),
+            static_cast<uint32_t>(view_bounds.bottom - view_bounds.top))) {
+      hdr_test_surface_.reset();
+    }
+  }
+
   // Removed automatic window show to let window_manager plugin control visibility
   // This prevents window flashing during startup
   // flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -104,6 +125,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  hdr_test_surface_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -115,6 +137,18 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // Runner-owned fullscreen must win over window_manager's ordinary
+  // title-bar calculations. Returning the entire monitor-sized window as the
+  // client area removes DWM's residual maximized frame.
+  if (FullscreenUtils::IsFullscreen()) {
+    if (message == WM_NCCALCSIZE && wparam) {
+      return 0;
+    }
+    if (message == WM_NCHITTEST) {
+      return HTCLIENT;
+    }
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
@@ -126,6 +160,15 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_SIZE:
+      if (hdr_test_surface_ && wparam != SIZE_MINIMIZED) {
+        // The Flutter child HWND is resized by Win32Window::MessageHandler
+        // after this callback, so querying it here would return the previous
+        // frame's size. WM_SIZE already carries the new parent client size.
+        hdr_test_surface_->Resize(static_cast<uint32_t>(LOWORD(lparam)),
+                                  static_cast<uint32_t>(HIWORD(lparam)));
+      }
+      break;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;

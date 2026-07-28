@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "flutter_window.h"
+#include "lifecycle_log.h"
 #include "utils.h"
 
 // recommended by NVIDIA to enable high-performance GPU
@@ -98,9 +99,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   flutter::DartProject project(L"data");
 
-  // Disable thread merge to improve performance
-  // Attention: This may impact plugin performance and may be incompatible with future Flutter releases.
-  project.set_ui_thread_policy(flutter::UIThreadPolicy::RunOnSeparateThread);
+  // ANGLE's DirectComposition window surfaces are not currently safe with
+  // Impeller's GLES renderer (Flutter 3.47 can dereference stale framebuffer
+  // state after a complex frame). Skia/GLES uses the same ANGLE/D3D11 device
+  // and keeps the shared DirectComposition visual tree stable.
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
+
+  // Keep Flutter's default Windows UI/platform thread policy. For this app the
+  // separate policy adds cross-thread hops to frequent window and method-
+  // channel work, which is especially visible with DirectComposition.
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
@@ -125,6 +132,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::TranslateMessage(&msg);
     ::DispatchMessage(&msg);
   }
+
+  kazumi::LifecycleLog("runner",
+                       "message_loop.exit code=" +
+                           std::to_string(static_cast<int>(msg.wParam)));
 
   ::CoUninitialize();
   if (mutex) {

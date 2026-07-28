@@ -31,6 +31,7 @@ if(MEDIA_KIT_LIBS_AVAILABLE)
   add_library(
     ${PLUGIN_NAME} SHARED
     "d3d11_renderer.cc"
+    "hdr_dcomp_renderer.cc"
     "mailbox_swap_chain.cc"
     "media_kit_video_plugin_c_api.cc"
     "media_kit_video_plugin.cc"
@@ -49,6 +50,7 @@ if(MEDIA_KIT_LIBS_AVAILABLE)
   target_compile_definitions(
     ${PLUGIN_NAME} PRIVATE
     FLUTTER_PLUGIN_IMPL
+    NOMINMAX
   )
 
   target_compile_options(${PLUGIN_NAME} PRIVATE "/utf-8")
@@ -62,6 +64,8 @@ if(MEDIA_KIT_LIBS_AVAILABLE)
     ${PLUGIN_NAME} PRIVATE
     flutter
     flutter_wrapper_plugin
+    d3d11.lib
+    dxgi.lib
 
     # Link to libmpv.
     "${LIBMPV_SRC}/libmpv.dll.a"

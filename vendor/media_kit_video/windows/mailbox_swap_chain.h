@@ -43,7 +43,9 @@ class MailboxSwapChain final : public IDXGISwapChain {
   static HRESULT Create(ID3D11Device* device,
                         int32_t width,
                         int32_t height,
-                        MailboxSwapChain** out);
+                        MailboxSwapChain** out,
+                        DXGI_FORMAT format = DXGI_FORMAT_B8G8R8A8_UNORM,
+                        bool shared = true);
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
                                            void** ppv) override;
@@ -132,6 +134,13 @@ class MailboxSwapChain final : public IDXGISwapChain {
 
   int32_t width() const { return width_; }
   int32_t height() const { return height_; }
+  ID3D11Texture2D* CurrentWriteTexture() const {
+    return slots_[write_slot_].texture.Get();
+  }
+  ID3D11Texture2D* LatestCompletedTexture() const {
+    return slots_[latest_completed_slot_.load(std::memory_order_acquire)]
+        .texture.Get();
+  }
 
  private:
   MailboxSwapChain() = default;
@@ -142,6 +151,7 @@ class MailboxSwapChain final : public IDXGISwapChain {
 
   HRESULT AllocateSlots();
   void ReleaseSlots();
+  HRESULT WaitForGpuIdle(DWORD timeout_ms = 500);
 
   struct TextureSlot {
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
@@ -152,9 +162,14 @@ class MailboxSwapChain final : public IDXGISwapChain {
 
   ID3D11Device* device_ = nullptr;
   Microsoft::WRL::ComPtr<ID3D11DeviceContext4> context4_;
+  Microsoft::WRL::ComPtr<ID3D11Fence> resize_fence_;
+  uint64_t resize_fence_value_ = 0;
+  HANDLE resize_fence_event_ = nullptr;
 
   int32_t width_ = 1;
   int32_t height_ = 1;
+  DXGI_FORMAT format_ = DXGI_FORMAT_B8G8R8A8_UNORM;
+  bool shared_ = true;
 
   TextureSlot slots_[4];
 

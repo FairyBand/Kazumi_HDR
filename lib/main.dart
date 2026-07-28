@@ -19,9 +19,48 @@ import 'package:kazumi/utils/device.dart';
 import 'package:kazumi/services/platform/webview_feature_service.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/navigation.dart';
+import 'package:kazumi/debug/hdr_dcomp_test_app.dart';
+import 'package:kazumi/debug/hdr_player_test_app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final hdrPlayerTestFile = Platform.environment['KAZUMI_HDR_PLAYER_TEST_FILE'];
+  if (Platform.isWindows && hdrPlayerTestFile?.isNotEmpty == true) {
+    MediaKit.ensureInitialized();
+    await windowManager.ensureInitialized();
+    windowManager.waitUntilReadyToShow(
+      const WindowOptions(
+        size: Size(1280, 720),
+        center: true,
+        backgroundColor: Colors.transparent,
+        title: 'Kazumi embedded mpv HDR test',
+      ),
+      () async {
+        await windowManager.show();
+        await windowManager.focus();
+      },
+    );
+    runApp(HdrPlayerTestApp(path: hdrPlayerTestFile!));
+    return;
+  }
+  if (Platform.isWindows &&
+      Platform.environment['KAZUMI_HDR_DCOMP_TEST'] == '1') {
+    await windowManager.ensureInitialized();
+    windowManager.waitUntilReadyToShow(
+      const WindowOptions(
+        size: Size(1280, 720),
+        center: true,
+        backgroundColor: Colors.transparent,
+        title: 'Kazumi HDR DirectComposition Test',
+      ),
+      () async {
+        await windowManager.show();
+        await windowManager.focus();
+      },
+    );
+    runApp(const HdrDcompTestApp());
+    return;
+  }
   MediaKit.ensureInitialized();
   if (Platform.isAndroid || Platform.isIOS) {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);

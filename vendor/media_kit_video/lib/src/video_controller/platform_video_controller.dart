@@ -115,6 +115,9 @@ class VideoControllerConfiguration {
   /// Default: `true`
   final bool enableHardwareAcceleration;
 
+  /// Whether to use Flutter's SurfaceProducer API on Android.
+  final bool enableAndroidSurfaceProducer;
+
   /// Whether to attach `android.view.Surface` after video parameters are known.
   ///
   /// Default:
@@ -146,6 +149,7 @@ class VideoControllerConfiguration {
     this.height,
     this.scale = 1.0,
     this.enableHardwareAcceleration = true,
+    this.enableAndroidSurfaceProducer = true,
     this.androidAttachSurfaceAfterVideoParameters,
     this.androidNativeSurfaceView = false,
     this.windowsNativeWindow = false,
@@ -160,6 +164,7 @@ class VideoControllerConfiguration {
     int? width,
     int? height,
     bool? enableHardwareAcceleration,
+    bool? enableAndroidSurfaceProducer,
     bool? androidAttachSurfaceAfterVideoParameters,
     bool? androidNativeSurfaceView,
     bool? windowsNativeWindow,
@@ -173,6 +178,8 @@ class VideoControllerConfiguration {
         height: height ?? this.height,
         enableHardwareAcceleration:
             enableHardwareAcceleration ?? this.enableHardwareAcceleration,
+        enableAndroidSurfaceProducer:
+            enableAndroidSurfaceProducer ?? this.enableAndroidSurfaceProducer,
         androidAttachSurfaceAfterVideoParameters:
             androidAttachSurfaceAfterVideoParameters ??
                 this.androidAttachSurfaceAfterVideoParameters,

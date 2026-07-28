@@ -236,11 +236,14 @@ abstract class _PlayerPlaybackController with Store {
     bool adBlockerEnabled, {
     required bool Function() canInstall,
     int offset = 0,
+    SuperResolutionMode? initialSuperResolutionMode,
+    bool? playOnOpen,
   }) async {
     startOffset = offset;
-    superResolutionMode = SuperResolutionMode.fromStorageValue(
-      GStorage.getSetting(SettingsKeys.defaultSuperResolutionMode),
-    );
+    superResolutionMode = initialSuperResolutionMode ??
+        SuperResolutionMode.fromStorageValue(
+          GStorage.getSetting(SettingsKeys.defaultSuperResolutionMode),
+        );
     if (_isMpvHdrMode(superResolutionMode) && !_supportsMpvHdr()) {
       superResolutionMode = SuperResolutionMode.off;
       await GStorage.putSetting(
@@ -387,11 +390,15 @@ abstract class _PlayerPlaybackController with Store {
       videoController ??= VideoController(
         player,
         configuration: VideoControllerConfiguration(
-          vo: videoRenderer,
+          vo: Platform.isWindows && _isMpvHdrMode(superResolutionMode)
+              ? 'libmpv'
+              : videoRenderer,
           enableHardwareAcceleration: hAenable,
           enableAndroidSurfaceProducer: false,
           hwdec: hAenable ? hardwareDecoder : 'no',
           androidAttachSurfaceAfterVideoParameters: false,
+          windowsNativeWindow:
+              Platform.isWindows && _isMpvHdrMode(superResolutionMode),
         ),
       );
       player.setPlaylistMode(PlaylistMode.none);
@@ -429,7 +436,7 @@ abstract class _PlayerPlaybackController with Store {
       await player.open(
         Media(videoUrl(),
             start: Duration(seconds: offset), httpHeaders: httpHeaders),
-        play: autoPlay,
+        play: playOnOpen ?? autoPlay,
       );
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
@@ -537,6 +544,12 @@ abstract class _PlayerPlaybackController with Store {
   }
 
   bool _supportsMpvHdr() => Platform.isWindows || Platform.isAndroid;
+
+  bool get usesWindowsDcompHdr =>
+      Platform.isWindows && _isMpvHdrMode(superResolutionMode);
+
+  bool wouldUseWindowsDcompHdr(SuperResolutionMode mode) =>
+      Platform.isWindows && _isMpvHdrMode(mode);
 
   Future<void> _setAndroidHdrWindowMode(bool enabled) async {
     if (!Platform.isAndroid || _androidHdrWindowModeEnabled == enabled) return;
@@ -697,6 +710,14 @@ abstract class _PlayerPlaybackController with Store {
   }
 
   Future<void> stop() async {
+    final previousMode = superResolutionMode;
+    final previousPlayer = _ownedPlayer?.player;
+    if (Platform.isWindows && previousPlayer != null) {
+      KazumiLogger().i(
+        'HDR_SWITCH playback.stop.begin mode=${previousMode.storageValue}',
+        forceLog: true,
+      );
+    }
     cachePolicy.stopWatching();
     await _setAndroidHdrWindowMode(false);
     final ownedPlayer = _ownedPlayer;
@@ -710,6 +731,12 @@ abstract class _PlayerPlaybackController with Store {
       ownedPlayer?.dispose() ?? Future<void>.value(),
       _cancelDebugInfo(),
     ]);
+    if (Platform.isWindows && previousPlayer != null) {
+      KazumiLogger().i(
+        'HDR_SWITCH playback.stop.complete mode=${previousMode.storageValue}',
+        forceLog: true,
+      );
+    }
   }
 
   Future<Uint8List?> screenshot({String format = 'image/jpeg'}) async {

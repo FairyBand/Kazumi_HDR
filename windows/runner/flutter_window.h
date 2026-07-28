@@ -8,6 +8,8 @@
 
 #include "win32_window.h"
 
+class HdrTestSurface;
+
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
  public:
@@ -28,6 +30,9 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // Present only in the opt-in KAZUMI_HDR_DCOMP_TEST diagnostic mode.
+  std::unique_ptr<HdrTestSurface> hdr_test_surface_;
 
   // Register Intent MethodChannel
   void RegisterIntentChannel();

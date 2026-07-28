@@ -117,8 +117,12 @@ class NativeVideoController extends PlatformVideoController {
   ) async {
     // Update [configuration] to have default values.
     configuration = configuration.copyWith(
-      vo: configuration.vo ??
-          (configuration.windowsNativeWindow ? 'gpu-next' : 'libmpv'),
+      // The embedded Windows HDR path is an mpv render API consumer. Setting
+      // gpu/gpu-next after creating that context makes mpv tear it down and
+      // create its own top-level playback window.
+      vo: configuration.windowsNativeWindow
+          ? 'libmpv'
+          : (configuration.vo ?? 'libmpv'),
       hwdec: configuration.hwdec ?? 'auto',
     );
 

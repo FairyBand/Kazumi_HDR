@@ -124,10 +124,7 @@ dependencies:
       ref: b11ec8050d1f07ca117022f2da3260281676346f
       path: ./media_kit
   media_kit_video:
-    git:
-      url: https://github.com/Predidit/media-kit.git
-      ref: b11ec8050d1f07ca117022f2da3260281676346f
-      path: ./media_kit_video
+    path: vendor/media_kit_video
   media_kit_libs_video:
     git:
       url: https://github.com/Predidit/media-kit.git

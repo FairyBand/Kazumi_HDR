@@ -13,10 +13,15 @@
 
 #include <client.h>
 #include <render.h>
+#include <render_dxgi.h>
 
-#include <future>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <functional>
+#include <future>
 #include <memory>
+#include <thread>
 
 #include <Windows.h>
 #include <flutter/method_channel.h>
@@ -24,6 +29,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include "d3d11_renderer.h"
+#include "hdr_dcomp_renderer.h"
 #include "thread_pool.h"
 
 typedef struct _VideoOutputConfiguration {
@@ -38,15 +44,14 @@ typedef struct _VideoOutputConfiguration {
                             bool enable_hardware_acceleration = true,
                             bool windows_native_window = false,
                             bool windows_native_rtx_hdr = false)
-      : width(width),
-        height(height),
+      : width(width), height(height),
         enable_hardware_acceleration(enable_hardware_acceleration),
         windows_native_window(windows_native_window),
         windows_native_rtx_hdr(windows_native_rtx_hdr) {}
 } VideoOutputConfiguration;
 
 class VideoOutput {
- public:
+public:
   int64_t texture_id() const { return texture_id_; }
   int64_t width() const {
     // H/W
@@ -71,10 +76,9 @@ class VideoOutput {
     return height_.value_or(1);
   }
 
-  VideoOutput(int64_t handle,
-              VideoOutputConfiguration configuration,
-              flutter::PluginRegistrarWindows* registrar,
-              ThreadPool* thread_pool_ref,
+  VideoOutput(int64_t handle, VideoOutputConfiguration configuration,
+              flutter::PluginRegistrarWindows *registrar,
+              ThreadPool *thread_pool_ref,
               std::function<void(std::function<void()>)> run_on_main_thread);
 
   ~VideoOutput();
@@ -84,11 +88,8 @@ class VideoOutput {
 
   void SetSize(std::optional<int64_t> width, std::optional<int64_t> height);
 
-  void SetNativeWindowRect(int64_t left,
-                           int64_t top,
-                           int64_t width,
-                           int64_t height,
-                           int64_t clip_top = 0,
+  void SetNativeWindowRect(int64_t left, int64_t top, int64_t width,
+                           int64_t height, int64_t clip_top = 0,
                            int64_t clip_bottom = 0);
 
   void ApplyNativeRtxHdrFilter();
@@ -100,8 +101,20 @@ class VideoOutput {
   void SyncNativeWindowRectWithClientOriginOnMainThread(LONG client_origin_x,
                                                         LONG client_origin_y);
 
- private:
+private:
   void NotifyRender();
+
+  void DrainHdrRender();
+
+  void ScheduleHdrResize();
+
+  void DrainHdrResize();
+
+  void StartHdrResizeScheduler();
+
+  void QueueHdrBackingResize();
+
+  void StopHdrResizeScheduler();
 
   void Render();
 
@@ -110,6 +123,12 @@ class VideoOutput {
   void Resize(int64_t required_width, int64_t required_height);
 
   void CreateNativeWindow();
+
+  void CreateHdrCompositionOutput();
+
+  void AttachHdrCompositionLayer();
+
+  void DetachHdrCompositionLayer();
 
   void CreatePlaceholderTexture();
 
@@ -121,12 +140,13 @@ class VideoOutput {
   std::optional<int64_t> width_ = std::nullopt;
   VideoOutputConfiguration configuration_ = VideoOutputConfiguration{};
 
-  mpv_handle* handle_ = nullptr;
-  mpv_render_context* render_context_ = nullptr;
+  mpv_handle *handle_ = nullptr;
+  mpv_render_context *render_context_ = nullptr;
   int64_t texture_id_ = 0;
   HWND native_window_ = nullptr;
   HWND flutter_view_window_ = nullptr;
   HWND parent_window_ = nullptr;
+  FlutterDesktopViewRef flutter_view_ = nullptr;
   int64_t native_window_left_ = 0;
   int64_t native_window_top_ = 0;
   int64_t native_window_width_ = 1;
@@ -134,13 +154,25 @@ class VideoOutput {
   int64_t native_window_clip_top_ = 0;
   int64_t native_window_clip_bottom_ = 0;
   bool native_window_rect_valid_ = false;
-  flutter::PluginRegistrarWindows* registrar_ = nullptr;
-  ThreadPool* thread_pool_ref_ = nullptr;
+  std::atomic_bool hdr_layer_attached_{false};
+  flutter::PluginRegistrarWindows *registrar_ = nullptr;
+  ThreadPool *thread_pool_ref_ = nullptr;
   std::function<void(std::function<void()>)> run_on_main_thread_ = nullptr;
   // For preventing any asynchronous operations (primarily texture objects
   // deletion after unregister in |Resize|) access this object after
   // destruction.
-  bool destroyed_ = false;
+  std::atomic_bool destroyed_{false};
+  std::atomic_bool hdr_render_dirty_{false};
+  std::atomic_bool hdr_render_scheduled_{false};
+  std::atomic_bool hdr_resize_scheduled_{false};
+  std::mutex hdr_rect_mutex_ = std::mutex();
+  uint64_t hdr_rect_generation_ = 0;
+  std::mutex hdr_resize_timer_mutex_ = std::mutex();
+  std::condition_variable hdr_resize_timer_condition_;
+  std::thread hdr_resize_timer_thread_;
+  bool hdr_resize_timer_stop_ = false;
+  bool hdr_resize_timer_pending_ = false;
+  std::chrono::steady_clock::time_point hdr_resize_deadline_;
 
   std::mutex textures_mutex_ = std::mutex();
 
@@ -150,6 +182,7 @@ class VideoOutput {
   // H/W rendering.
 
   std::unique_ptr<D3D11Renderer> d3d11_renderer_ = nullptr;
+  std::unique_ptr<HdrDcompRenderer> hdr_dcomp_renderer_ = nullptr;
   std::unordered_map<int64_t,
                      std::unique_ptr<FlutterDesktopGpuSurfaceDescriptor>>
       textures_ = {};
@@ -166,4 +199,4 @@ class VideoOutput {
       [](int64_t, int64_t, int64_t) {};
 };
 
-#endif  // VIDEO_OUTPUT_H_
+#endif // VIDEO_OUTPUT_H_

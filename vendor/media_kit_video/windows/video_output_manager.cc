@@ -7,15 +7,15 @@
 // LICENSE file.
 
 #include "video_output_manager.h"
+#include "../../../windows/runner/lifecycle_log.h"
 
 VideoOutputManager::VideoOutputManager(
-    flutter::PluginRegistrarWindows* registrar,
+    flutter::PluginRegistrarWindows *registrar,
     std::function<void(std::function<void()>)> run_on_main_thread)
     : registrar_(registrar), run_on_main_thread_(run_on_main_thread) {}
 
 void VideoOutputManager::Create(
-    int64_t handle,
-    VideoOutputConfiguration configuration,
+    int64_t handle, VideoOutputConfiguration configuration,
     std::function<void(int64_t, int64_t, int64_t)> texture_update_callback) {
   std::thread([=]() {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -24,13 +24,20 @@ void VideoOutputManager::Create(
           handle, configuration, registrar_, thread_pool_.get(),
           run_on_main_thread_);
       instance->SetTextureUpdateCallback(texture_update_callback);
+      if (auto pending = pending_native_rects_.find(handle);
+          pending != pending_native_rects_.end()) {
+        const auto &rect = pending->second;
+        instance->SetNativeWindowRect(rect.left, rect.top, rect.width,
+                                      rect.height, rect.clip_top,
+                                      rect.clip_bottom);
+        pending_native_rects_.erase(pending);
+      }
       video_outputs_.insert(std::make_pair(handle, std::move(instance)));
     }
   }).detach();
 }
 
-void VideoOutputManager::SetSize(int64_t handle,
-                                 std::optional<int64_t> width,
+void VideoOutputManager::SetSize(int64_t handle, std::optional<int64_t> width,
                                  std::optional<int64_t> height) {
   std::thread([=]() {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -40,20 +47,22 @@ void VideoOutputManager::SetSize(int64_t handle,
   }).detach();
 }
 
-void VideoOutputManager::SetNativeWindowRect(int64_t handle,
-                                             int64_t left,
-                                             int64_t top,
-                                             int64_t width,
-                                             int64_t height,
-                                             int64_t clip_top,
+void VideoOutputManager::SetNativeWindowRect(int64_t handle, int64_t left,
+                                             int64_t top, int64_t width,
+                                             int64_t height, int64_t clip_top,
                                              int64_t clip_bottom) {
-  std::thread([=]() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (video_outputs_.find(handle) != video_outputs_.end()) {
-      video_outputs_[handle]->SetNativeWindowRect(left, top, width, height,
-                                                  clip_top, clip_bottom);
-    }
-  }).detach();
+  // Rect updates are tiny, non-blocking state changes. Creating a detached OS
+  // thread for every resize frame is considerably more expensive than the
+  // work itself and makes maximize/fullscreen transitions visibly lag behind.
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (auto output = video_outputs_.find(handle);
+      output != video_outputs_.end()) {
+    output->second->SetNativeWindowRect(left, top, width, height, clip_top,
+                                        clip_bottom);
+  } else {
+    pending_native_rects_[handle] = {left,   top,      width,
+                                     height, clip_top, clip_bottom};
+  }
 }
 
 void VideoOutputManager::ApplyNativeRtxHdrFilter(int64_t handle) {
@@ -70,30 +79,41 @@ void VideoOutputManager::SyncNativeWindowRects() {
   if (!lock.owns_lock()) {
     return;
   }
-  for (auto& entry : video_outputs_) {
+  for (auto &entry : video_outputs_) {
     entry.second->SyncNativeWindowRectOnMainThread();
   }
 }
 
 void VideoOutputManager::SyncNativeWindowRectsWithClientOrigin(
-    LONG client_origin_x,
-    LONG client_origin_y) {
+    LONG client_origin_x, LONG client_origin_y) {
   std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
   if (!lock.owns_lock()) {
     return;
   }
-  for (auto& entry : video_outputs_) {
+  for (auto &entry : video_outputs_) {
     entry.second->SyncNativeWindowRectWithClientOriginOnMainThread(
         client_origin_x, client_origin_y);
   }
 }
 
-void VideoOutputManager::Dispose(int64_t handle) {
-  std::thread([=]() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (video_outputs_.find(handle) != video_outputs_.end()) {
-      video_outputs_.erase(handle);
+void VideoOutputManager::Dispose(int64_t handle,
+                                 std::function<void()> completion) {
+  kazumi::LifecycleLog("video_output_manager", "dispose.worker_queued handle=" +
+                                                   std::to_string(handle));
+  std::thread([this, handle, completion = std::move(completion)]() mutable {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (video_outputs_.find(handle) != video_outputs_.end()) {
+        // Destroying VideoOutput drains its render-context work and clears the
+        // DComp layer. Dart must not release the mpv handle or create the next
+        // output until this destruction has really completed.
+        video_outputs_.erase(handle);
+      }
+      pending_native_rects_.erase(handle);
     }
+    kazumi::LifecycleLog("video_output_manager",
+                         "dispose.destroyed handle=" + std::to_string(handle));
+    run_on_main_thread_(std::move(completion));
   }).detach();
 }
 

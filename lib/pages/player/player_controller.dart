@@ -40,6 +40,9 @@ class PlayerController implements Disposable {
   final AudioController audioController;
   final AsyncSessionOwner _initializations = AsyncSessionOwner();
   Future<void>? _shutdownFuture;
+  Future<void> _shaderChangeTail = Future<void>.value();
+  PlaybackInitParams? _lastPlaybackInitParams;
+  SuperResolutionMode? _sessionSuperResolutionMode;
   final PlayerPanelController panel = PlayerPanelController();
   final PlayerDebugController debug = PlayerDebugController();
 
@@ -161,11 +164,24 @@ class PlayerController implements Disposable {
     unawaited(GStorage.putSetting<double>(SettingsKeys.defaultVolume, clamped));
   }
 
-  Future<bool> init(PlaybackInitParams params) async {
+  Future<bool> init(
+    PlaybackInitParams params, {
+    bool preserveAudioSession = false,
+    bool? playOnOpen,
+  }) async {
     if (_initializations.isClosed) {
       return false;
     }
     final initialization = _initializations.begin();
+
+    if (Platform.isWindows && _sessionSuperResolutionMode != null) {
+      KazumiLogger().i(
+        'HDR_SWITCH init.begin mode=${_sessionSuperResolutionMode!.storageValue} '
+        'offset=${params.offset} preserveAudio=$preserveAudioSession '
+        'playOnOpen=$playOnOpen',
+        forceLog: true,
+      );
+    }
 
     videoUrl = params.videoUrl;
     isLocalPlayback = params.isLocalPlayback;
@@ -174,6 +190,7 @@ class PlayerController implements Disposable {
     currentDanmakuEpisodeNumber = params.danmakuEpisodeNumber;
     currentRoad = params.currentRoad;
     referer = params.referer;
+    _lastPlaybackInitParams = params;
 
     KazumiLogger().i(
         'PlayerController: ${params.isLocalPlayback ? "local" : "online"} playback, url: ${params.videoUrl}');
@@ -189,7 +206,15 @@ class PlayerController implements Disposable {
     playback.arrowKeySkipTime =
         GStorage.getSetting(SettingsKeys.arrowKeySkipTime);
     try {
-      await _releasePlaybackResources();
+      await _releasePlaybackResources(
+        releaseAudioSession: !preserveAudioSession,
+      );
+      if (Platform.isWindows && _sessionSuperResolutionMode != null) {
+        KazumiLogger().i(
+          'HDR_SWITCH init.old_resources_released',
+          forceLog: true,
+        );
+      }
     } catch (_) {}
     if (initialization.isStale) {
       return false;
@@ -202,6 +227,8 @@ class PlayerController implements Disposable {
         params.adBlockerEnabled,
         canInstall: () => initialization.isActive,
         offset: params.offset,
+        initialSuperResolutionMode: _sessionSuperResolutionMode,
+        playOnOpen: playOnOpen,
       );
     } catch (e) {
       if (initialization.isStale) {
@@ -269,6 +296,14 @@ class PlayerController implements Disposable {
     }
     KazumiLogger().i('PlayerController: video initialized');
     playback.loading = false;
+    _sessionSuperResolutionMode = playback.superResolutionMode;
+
+    if (Platform.isWindows) {
+      KazumiLogger().i(
+        'HDR_SWITCH init.complete mode=${playback.superResolutionMode.storageValue}',
+        forceLog: true,
+      );
+    }
 
     coverUrl = params.coverUrl;
 
@@ -287,10 +322,65 @@ class PlayerController implements Disposable {
   }
 
   Future<void> setShader(SuperResolutionMode mode, {Player? player}) async {
+    final operation = _shaderChangeTail.then(
+      (_) => _setShaderNow(mode, player: player),
+    );
+    _shaderChangeTail = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    await operation;
+  }
+
+  Future<void> _setShaderNow(
+    SuperResolutionMode mode, {
+    Player? player,
+  }) async {
+    final crossesWindowsOutputBoundary = Platform.isWindows &&
+        playback.usesWindowsDcompHdr != playback.wouldUseWindowsDcompHdr(mode);
+    final params = _lastPlaybackInitParams;
+    if (Platform.isWindows) {
+      KazumiLogger().i(
+        'HDR_SWITCH request from=${playback.superResolutionMode.storageValue} '
+        'to=${mode.storageValue} boundary=$crossesWindowsOutputBoundary',
+        forceLog: true,
+      );
+    }
+    if (crossesWindowsOutputBoundary && params != null) {
+      final wasPlaying = playback.playerPlaying;
+      final resumePosition = playback.playerPosition;
+      final previousMode = _sessionSuperResolutionMode;
+      _sessionSuperResolutionMode = mode;
+      final initialized = await init(
+        params.copyWith(offset: resumePosition.inSeconds),
+        preserveAudioSession: true,
+        playOnOpen: wasPlaying,
+      );
+      if (!initialized) {
+        KazumiLogger().w(
+          'HDR_SWITCH rebuild.cancelled to=${mode.storageValue}',
+          forceLog: true,
+        );
+        _sessionSuperResolutionMode = previousMode;
+        return;
+      }
+      if (wasPlaying) {
+        await play(enableSync: false);
+      } else {
+        await pause(enableSync: false);
+      }
+      KazumiLogger().i(
+        'HDR_SWITCH rebuild.complete to=${mode.storageValue} '
+        'position=${resumePosition.inMilliseconds}ms playing=$wasPlaying',
+        forceLog: true,
+      );
+      return;
+    }
     await playback.setShader(
       mode,
       player: player,
     );
+    _sessionSuperResolutionMode = playback.superResolutionMode;
   }
 
   Future<void> setPlaybackSpeed(double playerSpeed) async {
@@ -404,15 +494,30 @@ class PlayerController implements Disposable {
     ]);
   }
 
-  Future<void> _releasePlaybackResources() async {
+  Future<void> _releasePlaybackResources({
+    bool releaseAudioSession = true,
+  }) async {
+    if (Platform.isWindows && playback.mediaPlayer != null) {
+      KazumiLogger().i(
+        'HDR_SWITCH release.begin mode=${playback.superResolutionMode.storageValue} '
+        'releaseAudio=$releaseAudioSession',
+        forceLog: true,
+      );
+    }
     hideVolumeUITimer?.cancel();
     _volumeGestureSyncTimer?.cancel();
     FlutterVolumeController.removeListener();
     await Future.wait([
-      audioController.deactivate(),
+      if (releaseAudioSession) audioController.deactivate(),
       playback.stop(),
       _restoreSystemVolumeUi(),
     ]);
+    if (Platform.isWindows) {
+      KazumiLogger().i(
+        'HDR_SWITCH release.complete',
+        forceLog: true,
+      );
+    }
   }
 
   Future<void> _restoreSystemVolumeUi() async {
