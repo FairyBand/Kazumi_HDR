@@ -379,6 +379,11 @@ abstract class _PlayerPlaybackController with Store {
         hAenable = true;
         hardwareDecoder = Platform.isAndroid ? 'mediacodec' : 'd3d11va';
         await _setAndroidHdrWindowMode(true);
+        if (Platform.isAndroid) {
+          KazumiLogger().i(
+            'Player: Android native SurfaceView gpu-next HDR requested',
+          );
+        }
       }
 
       if (videoRenderer == 'mediacodec_embed') {
@@ -397,6 +402,8 @@ abstract class _PlayerPlaybackController with Store {
           enableAndroidSurfaceProducer: false,
           hwdec: hAenable ? hardwareDecoder : 'no',
           androidAttachSurfaceAfterVideoParameters: false,
+          androidNativeSurfaceView:
+              Platform.isAndroid && _isMpvHdrMode(superResolutionMode),
           windowsNativeWindow:
               Platform.isWindows && _isMpvHdrMode(superResolutionMode),
         ),
@@ -550,6 +557,12 @@ abstract class _PlayerPlaybackController with Store {
 
   bool wouldUseWindowsDcompHdr(SuperResolutionMode mode) =>
       Platform.isWindows && _isMpvHdrMode(mode);
+
+  bool get usesAndroidNativeMpvHdr =>
+      Platform.isAndroid && _isMpvHdrMode(superResolutionMode);
+
+  bool wouldUseAndroidNativeMpvHdr(SuperResolutionMode mode) =>
+      Platform.isAndroid && _isMpvHdrMode(mode);
 
   Future<void> _setAndroidHdrWindowMode(bool enabled) async {
     if (!Platform.isAndroid || _androidHdrWindowModeEnabled == enabled) return;

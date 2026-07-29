@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
@@ -22,6 +25,8 @@ class PlayerItemSurface extends StatefulWidget {
 class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
   static const MethodChannel _mediaKitVideoChannel =
       MethodChannel('com.alexmercerind/media_kit_video');
+  static const String _androidNativeSurfaceViewType =
+      'com.alexmercerind/media_kit_video/native_surface_view';
 
   Rect? _lastHdrRect;
   Rect? _pendingHdrRect;
@@ -130,36 +135,44 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
         );
       } else {
         final aspectRatioMode = playerController.panel.aspectRatioMode;
-        final video = Video(
-          controller: playerController.playback.videoController!,
-          controls: NoVideoControls,
-          pauseUponEnteringBackgroundMode: false,
-          fill: _usesWindowsDcompHdr ? Colors.transparent : Colors.black,
-          fit: aspectRatioMode.fit,
-          subtitleViewConfiguration: SubtitleViewConfiguration(
-            style: TextStyle(
-              color: Colors.pink,
-              fontSize: 48.0,
-              background: Paint()..color = Colors.transparent,
-              decoration: TextDecoration.none,
-              fontWeight: FontWeight.bold,
-              shadows: const [
-                Shadow(
-                  offset: Offset(1.0, 1.0),
-                  blurRadius: 3.0,
-                  color: Color.fromARGB(255, 255, 255, 255),
-                ),
-                Shadow(
-                  offset: Offset(-1.0, -1.0),
-                  blurRadius: 3.0,
-                  color: Color.fromARGB(125, 255, 255, 255),
-                ),
-              ],
+        final Widget video;
+        if (playerController.playback.usesAndroidNativeMpvHdr) {
+          video = _AndroidNativeSurfaceVideo(
+            playerController: playerController,
+            fit: aspectRatioMode.fit,
+          );
+        } else {
+          video = Video(
+            controller: playerController.playback.videoController!,
+            controls: NoVideoControls,
+            pauseUponEnteringBackgroundMode: false,
+            fill: _usesWindowsDcompHdr ? Colors.transparent : Colors.black,
+            fit: aspectRatioMode.fit,
+            subtitleViewConfiguration: SubtitleViewConfiguration(
+              style: TextStyle(
+                color: Colors.pink,
+                fontSize: 48.0,
+                background: Paint()..color = Colors.transparent,
+                decoration: TextDecoration.none,
+                fontWeight: FontWeight.bold,
+                shadows: const [
+                  Shadow(
+                    offset: Offset(1.0, 1.0),
+                    blurRadius: 3.0,
+                    color: Color.fromARGB(255, 255, 255, 255),
+                  ),
+                  Shadow(
+                    offset: Offset(-1.0, -1.0),
+                    blurRadius: 3.0,
+                    color: Color.fromARGB(125, 255, 255, 255),
+                  ),
+                ],
+              ),
+              textAlign: TextAlign.center,
+              padding: const EdgeInsets.all(24.0),
             ),
-            textAlign: TextAlign.center,
-            padding: const EdgeInsets.all(24.0),
-          ),
-        );
+          );
+        }
         final frameAspectRatio = aspectRatioMode.frameAspectRatio;
         surface = frameAspectRatio == null
             ? video
@@ -180,6 +193,98 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
         },
       );
     });
+  }
+}
+
+class _AndroidNativeSurfaceVideo extends StatefulWidget {
+  const _AndroidNativeSurfaceVideo({
+    required this.playerController,
+    required this.fit,
+  });
+
+  final PlayerController playerController;
+  final BoxFit fit;
+
+  @override
+  State<_AndroidNativeSurfaceVideo> createState() =>
+      _AndroidNativeSurfaceVideoState();
+}
+
+class _AndroidNativeSurfaceVideoState
+    extends State<_AndroidNativeSurfaceVideo> {
+  Future<int>? _handleFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _handleFuture = widget.playerController.playback.mediaPlayer?.handle;
+  }
+
+  @override
+  void didUpdateWidget(_AndroidNativeSurfaceVideo oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldPlayer = oldWidget.playerController.playback.mediaPlayer;
+    final player = widget.playerController.playback.mediaPlayer;
+    if (!identical(oldPlayer, player)) {
+      _handleFuture = player?.handle;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final videoController = widget.playerController.playback.videoController;
+    final handleFuture = _handleFuture;
+    if (videoController == null || handleFuture == null) {
+      return const ColoredBox(color: Colors.black);
+    }
+
+    return FutureBuilder<int>(
+      future: handleFuture,
+      builder: (context, snapshot) {
+        final handle = snapshot.data;
+        if (handle == null) {
+          return const ColoredBox(color: Colors.black);
+        }
+        return ValueListenableBuilder<Rect?>(
+          valueListenable: videoController.rect,
+          builder: (context, rect, _) {
+            final width = (rect?.width ?? 1).clamp(1.0, double.infinity);
+            final height = (rect?.height ?? 1).clamp(1.0, double.infinity);
+            return PlatformViewLink(
+              key: ValueKey('android-native-surface-$handle'),
+              viewType: _PlayerItemSurfaceState._androidNativeSurfaceViewType,
+              surfaceFactory: (context, controller) {
+                return AndroidViewSurface(
+                  controller: controller as AndroidViewController,
+                  hitTestBehavior: PlatformViewHitTestBehavior.transparent,
+                  gestureRecognizers: const <Factory<
+                      OneSequenceGestureRecognizer>>{},
+                );
+              },
+              onCreatePlatformView: (params) {
+                return PlatformViewsService.initExpensiveAndroidView(
+                  id: params.id,
+                  viewType: params.viewType,
+                  layoutDirection: TextDirection.ltr,
+                  creationParams: {
+                    'handle': handle.toString(),
+                    'width': width.round().toString(),
+                    'height': height.round().toString(),
+                    'fit': widget.fit.name,
+                  },
+                  creationParamsCodec: const StandardMessageCodec(),
+                  onFocus: () => params.onFocusChanged(true),
+                )
+                  ..addOnPlatformViewCreatedListener(
+                    params.onPlatformViewCreated,
+                  )
+                  ..create();
+              },
+            );
+          },
+        );
+      },
+    );
   }
 }
 

@@ -336,17 +336,21 @@ class PlayerController implements Disposable {
     SuperResolutionMode mode, {
     Player? player,
   }) async {
-    final crossesWindowsOutputBoundary = Platform.isWindows &&
-        playback.usesWindowsDcompHdr != playback.wouldUseWindowsDcompHdr(mode);
+    final crossesOutputBoundary = (Platform.isWindows &&
+            playback.usesWindowsDcompHdr !=
+                playback.wouldUseWindowsDcompHdr(mode)) ||
+        (Platform.isAndroid &&
+            playback.usesAndroidNativeMpvHdr !=
+                playback.wouldUseAndroidNativeMpvHdr(mode));
     final params = _lastPlaybackInitParams;
     if (Platform.isWindows) {
       KazumiLogger().i(
         'HDR_SWITCH request from=${playback.superResolutionMode.storageValue} '
-        'to=${mode.storageValue} boundary=$crossesWindowsOutputBoundary',
+        'to=${mode.storageValue} boundary=$crossesOutputBoundary',
         forceLog: true,
       );
     }
-    if (crossesWindowsOutputBoundary && params != null) {
+    if (crossesOutputBoundary && params != null) {
       final wasPlaying = playback.playerPlaying;
       final resumePosition = playback.playerPosition;
       final previousMode = _sessionSuperResolutionMode;
