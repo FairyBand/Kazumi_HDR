@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -8,6 +10,7 @@ import 'package:kazumi/bean/card/bangumi_card.dart';
 import 'package:kazumi/bean/widget/error_widget.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/pages/search/search_controller.dart';
+import 'package:kazumi/request/apis/bangumi_api.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/date_time.dart';
@@ -27,6 +30,18 @@ class SearchPage extends StatefulWidget {
   State<SearchPage> createState() => _SearchPageState();
 }
 
+class _SearchSuggestionState {
+  const _SearchSuggestionState({
+    this.query = '',
+    this.isLoading = false,
+    this.items = const [],
+  });
+
+  final String query;
+  final bool isLoading;
+  final List<BangumiItem> items;
+}
+
 class _SearchPageState extends State<SearchPage> {
   final SearchController searchController = SearchController();
 
@@ -35,6 +50,11 @@ class _SearchPageState extends State<SearchPage> {
 
   SearchFilterState filterState = const SearchFilterState();
   bool _syncingSearchText = false;
+  Timer? _suggestionDebounce;
+  int _suggestionRequestId = 0;
+  final _suggestionState = ValueNotifier<_SearchSuggestionState>(
+    const _SearchSuggestionState(),
+  );
 
   @override
   void initState() {
@@ -58,6 +78,8 @@ class _SearchPageState extends State<SearchPage> {
   void dispose() {
     searchPageController.bangumiList.clear();
     searchController.removeListener(_syncFilterFromSearchText);
+    _suggestionDebounce?.cancel();
+    _suggestionState.dispose();
     searchController.dispose();
     scrollController.removeListener(scrollListener);
     scrollController.dispose();
@@ -71,6 +93,34 @@ class _SearchPageState extends State<SearchPage> {
         SearchParser.fromFilterState(filterState)) {
       setState(() => filterState = parsed);
     }
+    _scheduleSuggestions(parsed.keyword);
+  }
+
+  void _scheduleSuggestions(String keyword) {
+    final query = keyword.trim();
+    _suggestionDebounce?.cancel();
+    final requestId = ++_suggestionRequestId;
+
+    if (query.isEmpty) {
+      final state = _suggestionState.value;
+      if (state.query.isNotEmpty || state.items.isNotEmpty || state.isLoading) {
+        _suggestionState.value = const _SearchSuggestionState();
+      }
+      return;
+    }
+
+    _suggestionState.value = _SearchSuggestionState(
+      query: query,
+      isLoading: true,
+    );
+    _suggestionDebounce = Timer(const Duration(milliseconds: 300), () async {
+      final page = await BangumiApi.bangumiSearch(query, limit: 6);
+      if (!mounted || requestId != _suggestionRequestId) return;
+      _suggestionState.value = _SearchSuggestionState(
+        query: query,
+        items: page?.items ?? const [],
+      );
+    });
   }
 
   void _setSearchText(String value) {
@@ -217,7 +267,12 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _submitSearch(String value) async {
     final parsed = SearchParser(value).toFilterState();
-    setState(() => filterState = parsed);
+    _suggestionDebounce?.cancel();
+    _suggestionRequestId++;
+    setState(() {
+      filterState = parsed;
+    });
+    _suggestionState.value = const _SearchSuggestionState();
     final normalizedValue = SearchParser.fromFilterState(parsed);
     _setSearchText(normalizedValue);
     await searchPageController.searchBangumi(normalizedValue, type: 'init');
@@ -274,17 +329,45 @@ class _SearchPageState extends State<SearchPage> {
                 isFullScreen: MediaQuery.sizeOf(context).width <
                     LayoutBreakpoint.compact['width']!,
                 suggestionsBuilder: (context, controller) => [
-                  Observer(
-                    builder: (context) {
+                  ValueListenableBuilder<_SearchSuggestionState>(
+                    valueListenable: _suggestionState,
+                    builder: (context, suggestionState, child) {
                       if (controller.text.isNotEmpty) {
-                        return const SizedBox(
-                          height: 400,
-                          child: Center(
-                            child: Text("暂无搜索建议，按回车直接检索"),
-                          ),
-                        );
-                      } else {
+                        if (suggestionState.isLoading) {
+                          return const SizedBox(
+                            height: 160,
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+                        if (suggestionState.items.isEmpty) {
+                          return const SizedBox(
+                            height: 160,
+                            child: Center(
+                              child: Text("暂无搜索建议，按回车直接检索"),
+                            ),
+                          );
+                        }
                         return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final item in suggestionState.items)
+                              ListTile(
+                                leading: const Icon(Icons.search),
+                                title: Text(item.nameCn),
+                                subtitle: item.name == item.nameCn
+                                    ? null
+                                    : Text(
+                                        item.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                onTap: () => _submitSearch(item.nameCn),
+                              ),
+                          ],
+                        );
+                      }
+                      return Observer(
+                        builder: (context) => Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             for (var history in searchPageController
@@ -305,8 +388,8 @@ class _SearchPageState extends State<SearchPage> {
                                 ),
                               ),
                           ],
-                        );
-                      }
+                        ),
+                      );
                     },
                   ),
                 ],

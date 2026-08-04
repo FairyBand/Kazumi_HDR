@@ -585,10 +585,8 @@ abstract class _PlayerPlaybackController with Store {
       await pp.setProperty('hwdec', 'mediacodec');
     }
     await pp.setProperty('target-trc', Platform.isAndroid ? 'hlg' : 'pq');
-    await pp.setProperty(
-        'target-prim', Platform.isAndroid ? 'display-p3' : 'bt.2020');
-    await pp.setProperty(
-        'target-gamut', Platform.isWindows ? 'display-p3' : 'auto');
+    await pp.setProperty('target-prim', 'bt.2020');
+    await pp.setProperty('target-gamut', 'display-p3');
     await pp.setProperty('target-colorspace-hint', 'yes');
     await pp.setProperty('target-colorspace-hint-strict', 'no');
     await pp.setProperty('target-peak', await _mpvHdrTargetPeak());

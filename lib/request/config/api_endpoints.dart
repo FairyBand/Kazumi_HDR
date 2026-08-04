@@ -26,9 +26,6 @@ class ApiEndpoints {
   static const String latestApp =
       'https://api.github.com/repos/FairyBand/Kazumi_HDR/releases/latest';
 
-  /// Bangumi 镜像测试后端
-  static const String bangumiMirrorDomain = 'https://api.kazumi.fyi';
-
   /// Kazumi 镜像后端应用更新
   static const String latestAppMirror = latestApp;
 
@@ -40,9 +37,6 @@ class ApiEndpoints {
 
   /// bangumi API
   static const String bangumiAPIDomain = 'https://api.bgm.tv';
-
-  /// Bangumi 鉴权 API
-  static const String bangumiAuthAPIMirrorDomain = 'https://api.bgmapi.com';
 
   /// Telegram 群组
   static const String telegramGroup = 'https://t.me/kazumi_app';
@@ -81,14 +75,6 @@ class ApiEndpoints {
 
   /// 番剧趋势
   static const String bangumiTrendsNext = '/p1/trending/subjects';
-
-  /// Kazumi Bangumi 镜像缓存榜单
-  static const String bangumiMirrorPopularSubjects =
-      '/kazumi/v1/popular/subjects';
-
-  /// Kazumi Bangumi 镜像季节时间表
-  static const String bangumiMirrorSeasonCalendar =
-      '/kazumi/v1/calendar/season';
 
   /// 番剧信息
   static const String bangumiInfoByIDNext = '/p1/subjects/{0}';

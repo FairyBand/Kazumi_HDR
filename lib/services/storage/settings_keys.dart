@@ -253,11 +253,6 @@ class SettingsKeys {
     true,
     group: SettingGroup.proxy,
   );
-  static const enableBangumiProxy = SettingKey<bool>(
-    _SettingBoxKey.enableBangumiProxy,
-    true,
-    group: SettingGroup.proxy,
-  );
   static const enableSystemProxy = SettingKey<bool>(
     _SettingBoxKey.enableSystemProxy,
     false,
@@ -569,7 +564,6 @@ class SettingsKeys {
     oledEnhance,
     displayMode,
     enableGitProxy,
-    enableBangumiProxy,
     enableSystemProxy,
     defaultStartupPage,
     isWideScreen,
@@ -681,7 +675,6 @@ class _SettingBoxKey {
       oledEnhance = 'oledEnhance',
       displayMode = 'displayMode',
       enableGitProxy = 'enableGitProxy',
-      enableBangumiProxy = 'enableBangumiProxy',
       enableSystemProxy = 'enableSystemProxy',
       defaultStartupPage = 'defaultStartupPage',
 

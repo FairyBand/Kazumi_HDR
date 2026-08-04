@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/network/bangumi_image_url_rewriter.dart';
 import 'package:kazumi/services/network/proxy_utils.dart';
 import 'package:kazumi/services/network/system_proxy_service.dart';
 import 'package:kazumi/services/storage/storage.dart';
@@ -29,12 +28,7 @@ class _ProxyAwareImageFileService extends FileService {
   }) async {
     final client = _createHttpClient();
     try {
-      final request = await client.getUrl(Uri.parse(
-        BangumiImageUrlRewriter.rewrite(
-          url,
-          enabled: _bangumiMirrorEnabled(),
-        ),
-      ));
+      final request = await client.getUrl(Uri.parse(url));
       headers?.forEach(request.headers.set);
       final response = await request.close();
       return _ProxyAwareImageFileServiceResponse(response, client);
@@ -42,10 +36,6 @@ class _ProxyAwareImageFileService extends FileService {
       client.close(force: true);
       rethrow;
     }
-  }
-
-  bool _bangumiMirrorEnabled() {
-    return GStorage.getSetting(SettingsKeys.enableBangumiProxy);
   }
 
   HttpClient _createHttpClient() {

@@ -20,7 +20,6 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
   late bool webDavEnableHistory;
   late bool webDavEnableCollect;
   late bool enableGitProxy;
-  late bool enableBangumiProxy;
   late bool bangumiSyncEnable;
 
   @override
@@ -30,7 +29,6 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
     webDavEnableHistory = GStorage.getSetting(SettingsKeys.webDavEnableHistory);
     webDavEnableCollect = GStorage.getSetting(SettingsKeys.webDavEnableCollect);
     enableGitProxy = GStorage.getSetting(SettingsKeys.enableGitProxy);
-    enableBangumiProxy = GStorage.getSetting(SettingsKeys.enableBangumiProxy);
     bangumiSyncEnable = GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
   }
 
@@ -99,20 +97,6 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
             SettingsSection(
               title: Text('Bangumi'),
               tiles: [
-                SettingsTile.switchTile(
-                  leading: Icons.cloud_rounded,
-                  onToggle: (value) async {
-                    enableBangumiProxy = value ?? !enableBangumiProxy;
-                    await GStorage.putSetting(
-                        SettingsKeys.enableBangumiProxy, enableBangumiProxy);
-                    if (mounted) {
-                      setState(() {});
-                    }
-                  },
-                  title: Text('Bangumi 镜像'),
-                  description: Text('使用本地 Bangumi 缓存后端加载热门与分类榜单'),
-                  initialValue: enableBangumiProxy,
-                ),
                 SettingsTile.switchTile(
                   leading: Icons.sync_rounded,
                   onToggle: (value) async {

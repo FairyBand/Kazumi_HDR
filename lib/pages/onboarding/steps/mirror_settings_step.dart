@@ -11,13 +11,11 @@ class MirrorSettingsStep extends StatefulWidget {
 
 class _MirrorSettingsStepState extends State<MirrorSettingsStep> {
   late bool enableGitProxy;
-  late bool enableBangumiProxy;
 
   @override
   void initState() {
     super.initState();
     enableGitProxy = GStorage.getSetting(SettingsKeys.enableGitProxy);
-    enableBangumiProxy = GStorage.getSetting(SettingsKeys.enableBangumiProxy);
   }
 
   @override
@@ -39,20 +37,6 @@ class _MirrorSettingsStepState extends State<MirrorSettingsStep> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SwitchListTile(
-                secondary: const Icon(Icons.travel_explore_rounded),
-                title: const Text('Bangumi 镜像'),
-                subtitle: const Text('加速热门与时间表加载'),
-                value: enableBangumiProxy,
-                onChanged: (value) async {
-                  enableBangumiProxy = value;
-                  await GStorage.putSetting(
-                      SettingsKeys.enableBangumiProxy, value);
-                  if (mounted) {
-                    setState(() {});
-                  }
-                },
-              ),
               SwitchListTile(
                 secondary: const Icon(Icons.extension_rounded),
                 title: const Text('规则仓库镜像'),
