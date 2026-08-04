@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:kazumi/bean/widget/bangumi_avatar.dart';
 import 'package:kazumi/modules/comments/comment_item.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:skeletonizer/skeletonizer.dart';
@@ -72,8 +73,8 @@ class CommentsCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  backgroundImage: NetworkImage(commentItem!.user.avatar.large),
+                BangumiAvatar(
+                  imageUrl: commentItem!.user.avatar.large,
                 ),
                 const SizedBox(width: 8),
                 Column(
@@ -83,15 +84,21 @@ class CommentsCard extends StatelessWidget {
                       spacing: 5,
                       children: [
                         Text(commentItem!.user.nickname),
-                        if(isOwn)
+                        if (isOwn)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 2),
                               decoration: BoxDecoration(
                                 color: Theme.of(context).colorScheme.primary,
                                 borderRadius: BorderRadius.circular(4),
                               ),
-                              child: Text('我的吐槽',
-                                style: TextStyle(fontSize: 12,color: Theme.of(context).colorScheme.primaryContainer),
+                              child: Text(
+                                '我的吐槽',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primaryContainer),
                               ))
                       ],
                     ),
